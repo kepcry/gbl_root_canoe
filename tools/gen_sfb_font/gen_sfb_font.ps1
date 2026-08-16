@@ -11,12 +11,13 @@
 
 $ErrorActionPreference = 'Stop'
 
-$FontName    = 'Noto Sans SC'
-$CellSize    = 24
-$Super       = 2
-$Canvas      = $CellSize * $Super
-$FontPx      = 42
-$AlphaLevels = 16
+$FontName      = 'Noto Sans SC'
+$CellSize      = 24
+$Grid          = $CellSize * 2          # 48x48 downsample source grid
+$RenderSize    = 80                     # tall render canvas (no top clipping)
+$FontPx        = 40
+$AlphaLevels   = 16
+$CellBaseline  = 36                     # baseline row in the 48 grid (cell row 18)
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $SrcFile = Join-Path $RepoRoot 'submodules\uefi\edk2\QcomModulePkg\Application\LinuxLoader\SuperFbLang.c'
@@ -48,9 +49,39 @@ foreach ($m in $matches) {
 $sorted = @($chars) | Sort-Object
 Write-Host ("Collected {0} unique characters" -f $sorted.Count)
 
+# ---- measure the render-canvas baseline once ------------------------------
+function Measure-Baseline {
+    $bmp = New-Object System.Drawing.Bitmap -ArgumentList $RenderSize, $RenderSize, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAlias
+    $g.Clear([System.Drawing.Color]::Transparent)
+    $font = New-Object System.Drawing.Font($FontName, $FontPx, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
+    $fmt = [System.Drawing.StringFormat]::GenericTypographic
+    # 'X' has no descender: its ink bottom sits on the baseline.
+    $g.DrawString('X', $font, [System.Drawing.Brushes]::White, (New-Object System.Drawing.PointF(0, 0)), $fmt)
+    $rect = New-Object System.Drawing.Rectangle(0, 0, $RenderSize, $RenderSize)
+    $data = $bmp.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $bytes = New-Object byte[] ($data.Stride * $RenderSize)
+    [System.Runtime.InteropServices.Marshal]::Copy($data.Scan0, $bytes, 0, $bytes.Length)
+    $bmp.UnlockBits($data)
+    $maxY = -1
+    for ($y = 0; $y -lt $RenderSize; $y++) {
+        for ($x = 0; $x -lt $RenderSize; $x++) {
+            if ($bytes[$y * $data.Stride + $x * 4 + 3] -gt 8) { $maxY = $y }
+        }
+    }
+    $font.Dispose(); $fmt.Dispose(); $g.Dispose(); $bmp.Dispose()
+    return $maxY
+}
+
+$BaselineY = Measure-Baseline
+if ($BaselineY -lt 0) { Write-Error 'Could not measure the font baseline' }
+Write-Host ("Render baseline at y={0}, cell baseline row {1}" -f $BaselineY, ($CellBaseline / 2))
+
 # ---- render one character into a packed 4-bit 24x24 glyph -----------------
 function Get-GlyphBytes([char]$Ch) {
-    $bmp = New-Object System.Drawing.Bitmap -ArgumentList $Canvas, $Canvas, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $bmp = New-Object System.Drawing.Bitmap -ArgumentList $RenderSize, $RenderSize, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
     $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAlias
@@ -61,17 +92,17 @@ function Get-GlyphBytes([char]$Ch) {
     $g.DrawString([string]$Ch, $font, $brush, (New-Object System.Drawing.PointF(0, 0)), $fmt)
     $font.Dispose(); $fmt.Dispose(); $g.Dispose()
 
-    $rect = New-Object System.Drawing.Rectangle(0, 0, $Canvas, $Canvas)
+    $rect = New-Object System.Drawing.Rectangle(0, 0, $RenderSize, $RenderSize)
     $data = $bmp.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
     $stride = $data.Stride
-    $bytes = New-Object byte[] ($stride * $Canvas)
+    $bytes = New-Object byte[] ($stride * $RenderSize)
     [System.Runtime.InteropServices.Marshal]::Copy($data.Scan0, $bytes, 0, $bytes.Length)
     $bmp.UnlockBits($data)
     $bmp.Dispose()
 
-    $minX = $Canvas; $minY = $Canvas; $maxX = -1; $maxY = -1
-    for ($y = 0; $y -lt $Canvas; $y++) {
-        for ($x = 0; $x -lt $Canvas; $x++) {
+    $minX = $RenderSize; $minY = $RenderSize; $maxX = -1; $maxY = -1
+    for ($y = 0; $y -lt $RenderSize; $y++) {
+        for ($x = 0; $x -lt $RenderSize; $x++) {
             $a = $bytes[$y * $stride + $x * 4 + 3]
             if ($a -gt 8) {
                 if ($x -lt $minX) { $minX = $x }
@@ -87,23 +118,29 @@ function Get-GlyphBytes([char]$Ch) {
 
     $w = $maxX - $minX + 1
     $h = $maxY - $minY + 1
-    $dx = [Math]::Floor(($Canvas - $w) / 2) - $minX
-    $dy = [Math]::Floor(($Canvas - $h) / 2) - $minY
+    $pasteX = [Math]::Floor(($Grid - $w) / 2)
+    $pasteY = $CellBaseline - ($BaselineY - $minY)
+
+    # The glyph must sit fully inside the 48 grid with its baseline on the
+    # fixed baseline row; otherwise the cell would clip it.
+    if ($pasteY -lt 0 -or $pasteY + $h -gt $Grid) {
+        Write-Host ("WARNING: glyph U+{0:X4} does not fit the cell (y {1}..{2})" -f [int]$Ch, $pasteY, ($pasteY + $h - 1))
+    }
 
     for ($y = 0; $y -lt $CellSize; $y++) {
         for ($x = 0; $x -lt $CellSize; $x++) {
-            $sx = $x * $Super + $dx
-            $sy = $y * $Super + $dy
             $sum = 0
-            for ($jy = 0; $jy -lt $Super; $jy++) {
-                for ($jx = 0; $jx -lt $Super; $jx++) {
-                    $px = $sx + $jx; $py = $sy + $jy
-                    if ($px -ge 0 -and $px -lt $Canvas -and $py -ge 0 -and $py -lt $Canvas) {
+            for ($jy = 0; $jy -lt 2; $jy++) {
+                for ($jx = 0; $jx -lt 2; $jx++) {
+                    # Map the 48-grid pixel back onto the render-canvas ink.
+                    $px = $x * 2 + $jx - $pasteX + $minX
+                    $py = $y * 2 + $jy - $pasteY + $minY
+                    if ($px -ge 0 -and $px -lt $RenderSize -and $py -ge 0 -and $py -lt $RenderSize) {
                         $sum += $bytes[$py * $stride + $px * 4 + 3]
                     }
                 }
             }
-            $alpha = [Math]::Min($AlphaLevels - 1, [Math]::Floor($sum / ($Super * $Super) / 16))
+            $alpha = [Math]::Min($AlphaLevels - 1, [Math]::Floor($sum / 4 / 16))
             $idx = $y * $CellSize + $x
             $byteIdx = [int][Math]::Floor($idx / 2)
             if (($idx % 2) -eq 0) {
