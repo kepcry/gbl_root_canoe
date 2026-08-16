@@ -96,18 +96,20 @@
 
  **/
 /*
- * 开机时扫描音量上键（WaitForVolumeDownKey 的镜像）。
+ * 开机时扫描音量键（恢复被 Slim 重构移除的 WaitForVolumeDownKey）。
  *
- * 先清空输入缓冲区，再用 WaitForEvent 在超时窗口内等待一次真正的音量上键。
- * 关键在于：非目标按键（尤其是开机时按住、随后松开的电源键）会被跳过并继续
+ * 先清空输入缓冲区，再用 WaitForEvent 在超时窗口内等待一次真正的音量键。
+ * 音量上键（recovery 槽位）和音量下键（fastboot/BDS 槽位）都会打开 BDS
+ * 菜单；非目标按键（尤其是开机时按住、随后松开的电源键）会被跳过并继续
  * 等待，而不是结束扫描——所以电源键既不会被误当成输入，也不会遮挡音量键。
  *
  * @param TimeoutMs   扫描窗口（毫秒）
- * @return TRUE(1)     检测到音量上键
- * @return FALSE(0)    超时未检测到
+ * @return 1          检测到音量上键
+ * @return 2          检测到音量下键
+ * @return 0          超时未检测到
  */
 STATIC UINT8
-WaitForVolumeUpKey (IN UINT32 TimeoutMs)
+WaitForVolumeKey (IN UINT32 TimeoutMs)
 {
   EFI_STATUS    Status;
   EFI_EVENT     TimerEvent;
@@ -167,12 +169,17 @@ WaitForVolumeUpKey (IN UINT32 TimeoutMs)
           KeyDetected = 1;
           break;
         }
-        /* 不是目标按键（电源键/音量下键等），忽略并继续等待 */
-        DEBUG ((EFI_D_INFO, "Not volume up key, continue waiting...\n"));
+        if (Key.ScanCode == SCAN_DOWN) { /* fastboot / BDS key */
+          /* 检测到音量下键 */
+          KeyDetected = 2;
+          break;
+        }
+        /* 不是目标按键（电源键等），忽略并继续等待 */
+        DEBUG ((EFI_D_INFO, "Not a volume key, continue waiting...\n"));
       }
     } else {
       /* 定时器超时 */
-      DEBUG ((EFI_D_INFO, "Timeout: %d ms expired, no volume up key\n",
+      DEBUG ((EFI_D_INFO, "Timeout: %d ms expired, no volume key\n",
               TimeoutMs));
       break;
     }
@@ -233,23 +240,16 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
     SFB_SETTINGS  Settings;
 
     /*
-     * TEMPORARY TEST BEHAVIOUR: with this set to 1 the loader always opens
-     * the boot menu and never launches a saved default entry, so the BDS can
-     * be exercised on a live device.  Flip back to 0 to restore the default
-     * boot (still controllable from Settings -> Boot to Menu on power-on).
+     * Scan for the volume keys held at power-on FIRST, before any other init
+     * disturbs the console input.  WaitForVolumeKey flushes stale input and
+     * then waits for a genuine volume press, skipping every other key (notably
+     * the power key used to switch the device on) rather than being fooled by
+     * it.  Volume Up (the official recovery key slot) or Volume Down (the
+     * documented BDS/fastboot slot) opens the boot menu; no volume press
+     * within the window launches the saved default entry.
      */
-#define SFB_TEST_ALWAYS_BOOTMENU  1
-
-    /*
-     * Scan for Volume Up held at power-on FIRST, before any other init disturbs
-     * the console input. WaitForVolumeUpKey flushes stale input and then waits
-     * for a genuine Volume Up press, skipping every other key (notably the
-     * power key used to switch the device on) rather than being fooled by it.
-     * Volume Up (the official recovery key slot) opens the boot menu; no Volume
-     * Up within the window launches the saved default entry.
-     */
-    MenuRequested = WaitForVolumeUpKey (3000);
-    DEBUG ((EFI_D_INFO, "SFB: power-on volume-up detected=%u\n", MenuRequested));
+    MenuRequested = WaitForVolumeKey (3000);
+    DEBUG ((EFI_D_INFO, "SFB: power-on volume key=%u\n", MenuRequested));
 
     /*
      * Now bring up the embedded FAT/USB stack so both the default entry and the
@@ -273,7 +273,7 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
     SfbGfxInit ();
 
     SfbSettingsGet (&Settings);
-    if (SFB_TEST_ALWAYS_BOOTMENU || Settings.BootToMenu) {
+    if (Settings.BootToMenu) {
       MenuRequested = 1;
     }
 

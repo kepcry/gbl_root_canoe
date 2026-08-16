@@ -2,11 +2,21 @@
 #
 # Renders every unique character used by the BDS UI with Noto Sans SC at 2x
 # resolution, downsamples to a 32px-tall cell and stores 4-bit anti-aliased
-# alpha (2 pixels per byte).  Glyphs are proportional: each glyph keeps only
-# its ink width plus 2px and records its own advance, so Latin text is not
-# spaced like a full-width grid.  The full printable ASCII range is always
-# included, so runtime characters (PIN digits, '>' and '*' markers) can never
-# come out as placeholder boxes.
+# alpha (2 pixels per byte).  Metrics are unified so mixed-script text lines
+# up cleanly:
+#
+#   - CJK ideographs and fullwidth forms (（），： etc.) all share one
+#     full-width advance (26px, half the 52px render em) and the ink is
+#     centred inside that cell, so Chinese text is perfectly even.
+#   - Latin/ASCII stays proportional (ink width + 2px side padding), so
+#     English words read naturally instead of being spaced like a grid.
+#   - The full printable ASCII range is always included, so runtime
+#     characters (PIN digits, '>' and '*' markers) can never come out as
+#     placeholder boxes.
+#
+# The horizontal downsample really is 2:1: each final column averages a 2px
+# render column, so glyphs keep their natural aspect ratio (a previous bug
+# made the cell as wide as the ink and stretched every glyph 2x).
 #
 #   powershell -ExecutionPolicy Bypass -File gen_sfb_font.ps1
 #
@@ -22,8 +32,9 @@ $RenderSize   = 100                      # tall render canvas (no top clipping)
 $FontPx       = 52
 $AlphaLevels  = 16
 $CellBaseline = 48                       # baseline row in the 64 grid (cell row 24)
-$AdvancePad   = 2                        # side padding added to the ink width
-$SpaceAdvance = 12                       # advance for the space character
+$CjkAdvance   = 26                       # uniform full-width advance (CJK etc.)
+$AdvancePad   = 2                        # side padding added to Latin ink widths
+$SpaceAdvance = 8                        # advance for the space character
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $SrcFile = Join-Path $RepoRoot 'submodules\uefi\edk2\QcomModulePkg\Application\LinuxLoader\SuperFbLang.c'
@@ -58,6 +69,23 @@ foreach ($m in $matches) {
 $sorted = @($chars) | Sort-Object
 Write-Host ("Collected {0} unique characters" -f $sorted.Count)
 
+# ---- character classification --------------------------------------------
+# East Asian Wide / Fullwidth ranges: these get the uniform full-width cell.
+function Test-WideChar([int]$Cp) {
+    if ($Cp -ge 0x1100 -and $Cp -le 0x115F) { return $true }   # Hangul Jamo
+    if ($Cp -ge 0x2E80 -and $Cp -le 0xA4CF) { return $true }   # CJK radicals,
+                                                               # punctuation,
+                                                               # ideographs,
+                                                               # Hangul
+    if ($Cp -ge 0xAC00 -and $Cp -le 0xD7A3) { return $true }   # Hangul syllables
+    if ($Cp -ge 0xF900 -and $Cp -le 0xFAFF) { return $true }   # CJK compat
+    if ($Cp -ge 0xFE10 -and $Cp -le 0xFE19) { return $true }   # vertical forms
+    if ($Cp -ge 0xFE30 -and $Cp -le 0xFE6F) { return $true }   # CJK compat forms
+    if ($Cp -ge 0xFF00 -and $Cp -le 0xFF60) { return $true }   # fullwidth forms
+    if ($Cp -ge 0xFFE0 -and $Cp -le 0xFFE6) { return $true }   # fullwidth signs
+    return $false
+}
+
 # ---- measure the render-canvas baseline once ------------------------------
 function Measure-Baseline {
     $bmp = New-Object System.Drawing.Bitmap -ArgumentList $RenderSize, $RenderSize, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
@@ -88,7 +116,7 @@ $BaselineY = Measure-Baseline
 if ($BaselineY -lt 0) { Write-Error 'Could not measure the font baseline' }
 Write-Host ("Render baseline at y={0}, cell baseline row {1}" -f $BaselineY, ($CellBaseline / 2))
 
-# ---- render one character into a packed 4-bit proportional glyph -----------
+# ---- render one character into a packed 4-bit glyph -----------------------
 function Get-Glyph([char]$Ch) {
     $bmp = New-Object System.Drawing.Bitmap -ArgumentList $RenderSize, $RenderSize, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
@@ -128,27 +156,38 @@ function Get-Glyph([char]$Ch) {
         return @{ Bytes = (New-Object byte[] (2 * $CellHeight / 2)); Width = 2; Advance = $advance }
     }
 
-    $w = $maxX - $minX + 1
-    if (($w % 2) -ne 0) { $w++ }          # packing needs an even width
+    $inkW = $maxX - $minX + 1
     $h = $maxY - $minY + 1
-    $pasteX = [Math]::Floor(($Grid - $w) / 2)
+
+    # Wide characters (CJK, fullwidth punctuation) use one uniform full-width
+    # cell with the ink centred; Latin keeps an ink-sized cell.
+    $isWide = Test-WideChar ([int]$Ch)
+    if ($isWide) {
+        $cellW = $CjkAdvance
+    } else {
+        $cellW = [Math]::Ceiling($inkW / 2.0)
+        if (($cellW % 2) -ne 0) { $cellW++ }   # packing needs an even width
+    }
+
+    # Centre the 2x sample window (cellW*2 render columns) over the ink.
+    $off = [Math]::Max(0, [Math]::Floor(($cellW * 2 - $inkW) / 2))
     $pasteY = $CellBaseline - ($BaselineY - $minY)
 
     if ($pasteY -lt 0 -or $pasteY + $h -gt $Grid) {
         Write-Host ("WARNING: glyph U+{0:X4} does not fit the cell (y {1}..{2})" -f [int]$Ch, $pasteY, ($pasteY + $h - 1))
     }
 
-    $out = New-Object byte[] (($w * $CellHeight) / 2)
+    $out = New-Object byte[] (($cellW * $CellHeight) / 2)
     for ($y = 0; $y -lt $CellHeight; $y++) {
-        for ($x = 0; $x -lt $w; $x++) {
+        for ($x = 0; $x -lt $cellW; $x++) {
             $sum = 0
             for ($jy = 0; $jy -lt 2; $jy++) {
                 for ($jx = 0; $jx -lt 2; $jx++) {
-                    # Horizontal: the cell is exactly as wide as the ink, so
-                    # cell column x maps straight to render column minX+2x.
+                    # Horizontal: one final column averages a 2px render
+                    # column, so the glyph keeps its natural aspect ratio.
                     # Vertical: the 32px cell is taller than most glyphs, so
                     # the pasteY offset is needed to anchor the baseline.
-                    $px = $minX + $x * 2 + $jx
+                    $px = $minX - $off + $x * 2 + $jx
                     $py = $y * 2 + $jy - $pasteY + $minY
                     if ($px -ge 0 -and $px -lt $RenderSize -and $py -ge 0 -and $py -lt $RenderSize) {
                         $sum += $bytes[$py * $stride + $px * 4 + 3]
@@ -156,7 +195,7 @@ function Get-Glyph([char]$Ch) {
                 }
             }
             $alpha = [Math]::Min($AlphaLevels - 1, [Math]::Floor($sum / 4 / 16))
-            $idx = $y * $w + $x
+            $idx = $y * $cellW + $x
             $byteIdx = [int][Math]::Floor($idx / 2)
             if (($idx % 2) -eq 0) {
                 $out[$byteIdx] = $alpha -shl 4
@@ -166,16 +205,16 @@ function Get-Glyph([char]$Ch) {
         }
     }
 
-    $advance = $w + $AdvancePad
-    if ($advance -gt $Grid) { $advance = $Grid }
-    return @{ Bytes = $out; Width = $w; Advance = $advance }
+    $advance = if ($isWide) { $CjkAdvance } else { $cellW + $AdvancePad }
+    return @{ Bytes = $out; Width = $cellW; Advance = $advance }
 }
 
 # ---- build the C source -----------------------------------------------------
 $sb = New-Object System.Text.StringBuilder
 [void]$sb.AppendLine('/*')
 [void]$sb.AppendLine(' * Generated by tools/gen_sfb_font/gen_sfb_font.ps1 - do not edit by hand.')
-[void]$sb.AppendLine(" * Font: $FontName, ${CellHeight}px tall proportional cells, 4-bit anti-aliased alpha.")
+[void]$sb.AppendLine(" * Font: $FontName, ${CellHeight}px tall cells, 4-bit anti-aliased alpha.")
+[void]$sb.AppendLine(" * CJK/fullwidth forms: ${CjkAdvance}px uniform advance; Latin: proportional advance.")
 [void]$sb.AppendLine(' */')
 [void]$sb.AppendLine('')
 [void]$sb.AppendLine('#include "SuperFbFont.h"')

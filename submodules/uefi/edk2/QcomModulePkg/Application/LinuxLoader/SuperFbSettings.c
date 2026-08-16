@@ -20,7 +20,7 @@ STATIC SFB_SETTINGS  mSfbSettings = {
   FALSE,          /* PinEnabled */
   L"0000",        /* Pin */
   TRUE,           /* ShowBooting */
-  TRUE            /* BootToMenu */
+  FALSE           /* BootToMenu: volume key opens the menu, no key boots */
 };
 
 /*

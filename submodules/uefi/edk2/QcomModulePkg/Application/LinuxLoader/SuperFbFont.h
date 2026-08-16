@@ -1,13 +1,14 @@
 /*
  * Embedded bitmap font for the graphical BDS UI.
  *
- * Proportional glyphs on a 32px-tall grid, 4-bit anti-aliased alpha (16
- * levels), two pixels packed per byte, row-major.  Every glyph keeps only
- * its ink width (always even) plus an advance, so Latin letters sit close
- * together while CJK characters stay near full width.  Covers the full
- * printable ASCII range plus every CJK character used by the UI string
- * table; characters outside the table are rendered as a hollow placeholder
- * box by the drawing code.
+ * Glyphs on a 32px-tall grid, 4-bit anti-aliased alpha (16 levels), two
+ * pixels packed per byte, row-major.  Metrics are unified so mixed-script
+ * text lines up cleanly: every CJK ideograph and fullwidth form shares one
+ * uniform 26px advance with the ink centred in the cell, while Latin/ASCII
+ * stays proportional (ink width plus a 2px pad).  Covers the full printable
+ * ASCII range plus every CJK character used by the UI string table;
+ * characters outside the table are rendered as a hollow placeholder box by
+ * the drawing code.
  *
  * Copyright (c) 2026, contributors to the canoe ABL tree.
  * SPDX-License-Identifier: BSD-3-Clause

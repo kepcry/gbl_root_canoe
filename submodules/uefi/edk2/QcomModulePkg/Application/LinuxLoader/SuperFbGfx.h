@@ -2,8 +2,8 @@
  * Minimal Graphics Output (GOP) renderer for the BDS boot menu.
  *
  * Draws directly to the frame buffer through GOP->Blt with the embedded
- * 24x24 anti-aliased bitmap font (SuperFbFontData.c).  When the platform has
- * no GOP the UI falls back to the text console, so every drawing function
+ * 32px-tall anti-aliased bitmap font (SuperFbFontData.c).  When the platform
+ * has no GOP the UI falls back to the text console, so every drawing function
  * here is only reached through SfbGfxActive ().
  *
  * Copyright (c) 2026, contributors to the canoe ABL tree.
@@ -60,7 +60,7 @@ SfbGfxHLine (IN UINT32 Y,
              IN UINT32 Color);
 
 /*
- * Draw a string with the embedded proportional font starting at (X, Y).
+ * Draw a string with the embedded bitmap font starting at (X, Y).
  * Characters missing from the font table are drawn as a hollow placeholder
  * box.  The string is clipped at the right edge of the screen.
  */

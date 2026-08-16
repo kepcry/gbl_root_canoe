@@ -444,7 +444,8 @@ SfbGfxPanelRow (IN BOOLEAN Selected, IN CONST CHAR16 *Marker,
     StrnCpyS (Full, SFB_DESC_CHARS + 8, Text, SFB_DESC_CHARS + 7);
   }
 
-  /* Proportional font: 8px is a safe minimum advance for the fit estimate. */
+  /* The narrowest Latin glyphs advance 6px and CJK cells 26px; this only
+   * bounds the truncation buffer, so the rough 8px estimate is fine. */
   MaxChars = W / 8;
   if (MaxChars > SFB_DESC_CHARS + 4) {
     MaxChars = SFB_DESC_CHARS + 4;
