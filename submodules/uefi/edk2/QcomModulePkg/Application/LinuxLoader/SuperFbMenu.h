@@ -73,6 +73,7 @@ typedef enum {
   /* Built-in entries; no backing file, handled in code. */
   SfbEntryFastboot,
   SfbEntrySelector,
+  SfbEntrySettings,
   /* "Back" row at the foot of a submenu: returns to the parent menu. */
   SfbEntryBack,
   /* Power management actions offered at the end of the menu and on the
@@ -214,16 +215,18 @@ SfbGetVolumeLabel (IN EFI_FILE_PROTOCOL *Root,
 /* ---- SuperFbStore.c: settings kept in the tail of the ESP ---------------- */
 
 /*
- * The firmware on this platform rejects variables it does not know, so the two
- * things the menu has to remember outlive a reboot in the EFI System Partition
- * instead: two 1 KiB NUL-padded ASCII records written to the very end of the
- * partition, which is the only part of it that is safe to touch.
+ * The firmware on this platform rejects variables it does not know, so the
+ * things the menu has to remember outlive a reboot in the EFI System
+ * Partition instead: 1 KiB NUL-padded ASCII records written to the very end
+ * of the partition, which is the only part of it that is safe to touch.
+ * Slot 2 holds the BDS settings (language, PIN, toggles) as key=value lines.
  */
 #define SFB_STORE_SLOT_BYTES  1024
-#define SFB_STORE_SLOTS       2
+#define SFB_STORE_SLOTS       3
 
 #define SFB_STORE_DEFAULT  0   /* the entry the menu timeout launches */
 #define SFB_STORE_CUSTOM   1   /* the single user-added menu entry */
+#define SFB_STORE_SETTINGS 2   /* BDS settings record (key=value lines) */
 
 /*
  * Replace one record. Text is NUL-terminated ASCII of at most
@@ -366,6 +369,13 @@ SfbWaitForKey (IN UINT32 TimeoutMs);
  */
 #define SFB_VISIBLE_ROWS  8
 
+/*
+ * Rows the current UI actually shows: the graphical panel computes this from
+ * the screen height, the text console always uses SFB_VISIBLE_ROWS.
+ */
+UINTN
+SfbVisibleRows (VOID);
+
 VOID
 SfbBeginScreen (IN CONST CHAR16 *Title, IN CONST CHAR16 *Subtitle OPTIONAL);
 
@@ -380,6 +390,20 @@ SfbDrawRow (IN BOOLEAN      Selected,
 /* Dim, left-aligned note inside the current panel ("... N more" and friends). */
 VOID
 SfbPanelNote (IN CONST CHAR16 *Text);
+
+/*
+ * Settings menu: language, PIN lock, "Booting" banner and power-on boot-menu
+ * behaviour.  Every change is persisted to the efisp tail settings record.
+ */
+VOID
+SfbRunSettingsMenu (VOID);
+
+/*
+ * Enforce the PIN lock before the boot menu opens.  Returns TRUE when the
+ * menu may be entered (PIN disabled, or a correct PIN was entered).
+ */
+BOOLEAN
+SfbRunPinGate (VOID);
 
 /* First row of the visible window, chosen to keep Cursor inside it. */
 UINTN

@@ -1,0 +1,51 @@
+/*
+ * Persistent settings for the BDS boot menu.
+ *
+ * The settings live in slot SFB_STORE_SETTINGS of the raw record store at the
+ * end of the efisp (EFI System) partition, next to the default/custom boot
+ * entry records.  The record is a single printable-ASCII line of key=value
+ * pairs separated by ';', so it stays easy to read and edit on the device:
+ *
+ *   SFBCFG1;lang=zh;pin_enable=0;pin=0000;show_booting=1;boot_to_menu=1
+ *
+ * Copyright (c) 2026, contributors to the canoe ABL tree.
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
+#ifndef __SUPER_FB_SETTINGS_H__
+#define __SUPER_FB_SETTINGS_H__
+
+#include <Uefi.h>
+#include "SuperFbLang.h"
+
+#define SFB_PIN_DIGITS  4
+
+typedef struct {
+  SFB_LANG  Lang;
+  BOOLEAN   PinEnabled;
+  /* 4 digits plus terminator, ASCII '0'-'9'. */
+  CHAR16    Pin[SFB_PIN_DIGITS + 1];
+  BOOLEAN   ShowBooting;
+  BOOLEAN   BootToMenu;
+} SFB_SETTINGS;
+
+/*
+ * Load settings from the efisp partition tail record.  A missing or invalid
+ * record falls back to defaults (Pin off, BootToMenu on).
+ */
+EFI_STATUS
+SfbSettingsLoad (VOID);
+
+/* Snapshot of the currently loaded settings. */
+VOID
+SfbSettingsGet (OUT SFB_SETTINGS *Out);
+
+/* Persist Settings to the efisp partition tail record. */
+EFI_STATUS
+SfbSettingsSave (IN CONST SFB_SETTINGS *Settings);
+
+/* TRUE when Pin matches the stored PIN (or when the PIN is disabled). */
+BOOLEAN
+SfbSettingsCheckPin (IN CONST CHAR16 *Pin);
+
+#endif /* __SUPER_FB_SETTINGS_H__ */

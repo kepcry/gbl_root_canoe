@@ -71,6 +71,15 @@
 [Sources]
 	LinuxLoader.c
 	SuperFbMenu.h
+	SuperFbLang.h
+	SuperFbLang.c
+	SuperFbFont.h
+	SuperFbFont.c
+	SuperFbFontData.c
+	SuperFbGfx.h
+	SuperFbGfx.c
+	SuperFbSettings.h
+	SuperFbSettings.c
 	SuperFbFat.c
 	SuperFbStore.c
 	SuperFbEntries.c
@@ -144,6 +153,7 @@
 	gEfiPartTypeSystemPartGuid
 
 [Protocols]
+	gEfiGraphicsOutputProtocolGuid
 	gEfiSimpleTextInputExProtocolGuid
 	gEfiBlockIoProtocolGuid
 	gEfiLoadedImageProtocolGuid

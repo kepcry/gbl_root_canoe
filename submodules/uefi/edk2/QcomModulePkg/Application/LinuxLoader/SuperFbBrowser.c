@@ -9,6 +9,7 @@
  */
 
 #include "SuperFbMenu.h"
+#include "SuperFbLang.h"
 
 #include <Library/BaseLib.h>
 #include <Library/BaseMemoryLib.h>
@@ -278,25 +279,24 @@ BOOLEAN
 SfbDriverActionMenu (IN EFI_HANDLE   Volume,
                      IN CONST CHAR16 *FullPath)
 {
-  STATIC CONST CHAR16  *Actions[] = {
-    L"Load",
-    L"Back"
-  };
-
   UINTN  Cursor = 0;
 
   while (TRUE) {
     UINTN       Index;
+    CONST CHAR16  *Actions[2];
     SFB_KEY     Key;
     EFI_STATUS  Status;
 
-    SfbBeginScreen (L"EFI Driver", FullPath);
+    Actions[0] = SfbStr (StrLoad);
+    Actions[1] = SfbStr (StrBack);
+
+    SfbBeginScreen (SfbStr (StrEfiDriver), FullPath);
 
     for (Index = 0; Index < ARRAY_SIZE (Actions); Index++) {
       SfbDrawRow ((BOOLEAN)(Index == Cursor), L" ", Actions[Index]);
     }
 
-    SfbEndScreen (L"Vol Up/Down: move   Power: select");
+    SfbEndScreen (SfbStr (StrKeyNavSelect));
 
     Key = SfbWaitForKey (0);
     if (Key == SfbKeyUp || Key == SfbKeyDown) {
@@ -310,8 +310,8 @@ SfbDriverActionMenu (IN EFI_HANDLE   Volume,
       if (!EFI_ERROR (Status)) {
         SfbConnectAll ();
       }
-      SfbReportStatus (EFI_ERROR (Status) ? L"Driver load failed"
-                                          : L"Driver loaded", Status);
+      SfbReportStatus (EFI_ERROR (Status) ? SfbStr (StrDriverLoadFailed)
+                                          : SfbStr (StrDriverLoaded), Status);
       continue;
     }
 
@@ -330,12 +330,6 @@ SfbEfiActionMenu (IN EFI_HANDLE   Volume,
                   IN CONST CHAR16 *FullPath,
                   IN CONST CHAR16 *Name)
 {
-  STATIC CONST CHAR16  *Actions[] = {
-    L"Boot (temporary)",
-    L"Add to BootMenu",
-    L"Back"
-  };
-
   EFI_STATUS         Status;
   SFB_BOOT_ENTRY     Entry;
   UINTN              Cursor = 0;
@@ -353,21 +347,26 @@ SfbEfiActionMenu (IN EFI_HANDLE   Volume,
 
   Status = SfbMakeFileEntry (Volume, FullPath, Name, &Entry);
   if (EFI_ERROR (Status)) {
-    SfbReportStatus (L"Cannot address that file", Status);
+    SfbReportStatus (SfbStr (StrCannotAddressFile), Status);
     return FALSE;
   }
 
   while (TRUE) {
-    UINTN    Index;
-    SFB_KEY  Key;
+    UINTN         Index;
+    CONST CHAR16  *Actions[3];
+    SFB_KEY       Key;
 
-    SfbBeginScreen (L"EFI Application", FullPath);
+    Actions[0] = SfbStr (StrBootTemporary);
+    Actions[1] = SfbStr (StrAddToBootMenu);
+    Actions[2] = SfbStr (StrBack);
+
+    SfbBeginScreen (SfbStr (StrEfiApplication), FullPath);
 
     for (Index = 0; Index < ARRAY_SIZE (Actions); Index++) {
       SfbDrawRow ((BOOLEAN)(Index == Cursor), L" ", Actions[Index]);
     }
 
-    SfbEndScreen (L"Vol Up/Down: move   Power: select");
+    SfbEndScreen (SfbStr (StrKeyNavSelect));
 
     Key = SfbWaitForKey (0);
     if (Key == SfbKeyUp || Key == SfbKeyDown) {
@@ -380,7 +379,7 @@ SfbEfiActionMenu (IN EFI_HANDLE   Volume,
        * Menu-driven launch, so clear the screen for the "Booting" banner. */
       Status = SfbLaunchEntry (&Entry, TRUE, TRUE);
       if (EFI_ERROR (Status)) {
-        SfbReportStatus (L"Boot failed", Status);
+    SfbReportStatus (SfbStr (StrBootFailed), Status);
       }
       continue;
     }
@@ -388,10 +387,10 @@ SfbEfiActionMenu (IN EFI_HANDLE   Volume,
     if (Cursor == 1) {
       Status = SfbSaveCustomEntry (&Entry);
       if (EFI_ERROR (Status)) {
-        SfbReportStatus (L"Could not save entry", Status);
+        SfbReportStatus (SfbStr (StrCouldNotSaveEntry), Status);
         continue;
       }
-      SfbReportStatus (L"Added to boot menu", Status);
+      SfbReportStatus (SfbStr (StrAddedToBootMenu), Status);
       SfbFreeEntry (&Entry);
       return TRUE;
     }
@@ -419,7 +418,7 @@ SfbBrowseVolume (IN EFI_HANDLE   Volume,
 
   List = AllocateZeroPool (SFB_MAX_DIR_ENTRIES * sizeof (*List));
   if (List == NULL) {
-    SfbReportStatus (L"Out of memory", EFI_OUT_OF_RESOURCES);
+    SfbReportStatus (SfbStr (StrOutOfMemory), EFI_OUT_OF_RESOURCES);
     return FALSE;
   }
 
@@ -452,7 +451,7 @@ SfbBrowseVolume (IN EFI_HANDLE   Volume,
       }
 
       if (EFI_ERROR (Status)) {
-        SfbReportStatus (L"Cannot read directory", Status);
+        SfbReportStatus (SfbStr (StrCannotReadDir), Status);
         if (StrCmp (Path, BrowseRoot) == 0) {
           /* The browse root itself is unusable; give up on this volume. */
           break;
@@ -467,8 +466,8 @@ SfbBrowseVolume (IN EFI_HANDLE   Volume,
 
     SfbBeginScreen (VolumeLabel, Path);
 
-    Start = SfbWindowStart (Cursor, Count, SFB_VISIBLE_ROWS);
-    Last = Start + SFB_VISIBLE_ROWS;
+    Start = SfbWindowStart (Cursor, Count, SfbVisibleRows ());
+    Last = Start + SfbVisibleRows ();
     if (Last > Count) {
       Last = Count;
     }
@@ -490,20 +489,19 @@ SfbBrowseVolume (IN EFI_HANDLE   Volume,
     if (Last < Count) {
       CHAR16  Note[32];
 
-      UnicodeSPrint (Note, sizeof (Note), L"... %u more",
+      UnicodeSPrint (Note, sizeof (Note), SfbStr (StrMore),
                      (UINT32)(Count - Last));
       SfbPanelNote (Note);
     }
     if (Truncated) {
       CHAR16  Note[64];
 
-      UnicodeSPrint (Note, sizeof (Note),
-                     L"(directory has more than %u entries; rest not shown)",
+      UnicodeSPrint (Note, sizeof (Note), SfbStr (StrDirTruncated),
                      (UINT32)SFB_MAX_DIR_ENTRIES);
       SfbPanelNote (Note);
     }
 
-    SfbEndScreen (L"Vol Up/Down: move   Power: open");
+    SfbEndScreen (SfbStr (StrKeyNavOpen));
 
     Key = SfbWaitForKey (0);
     if (Key == SfbKeyUp || Key == SfbKeyDown) {
@@ -534,7 +532,7 @@ SfbBrowseVolume (IN EFI_HANDLE   Volume,
     }
 
     if (!SfbIsEfiFile (Selected->Name)) {
-      SfbReportStatus (L"Not an EFI application", EFI_UNSUPPORTED);
+      SfbReportStatus (SfbStr (StrNotEfiApp), EFI_UNSUPPORTED);
       continue;
     }
 
@@ -577,7 +575,7 @@ SfbRunFileBrowser (VOID)
 
   Status = SfbLocateVolumes (&Volumes, &VolumeCount);
   if (EFI_ERROR (Status) || Volumes == NULL || VolumeCount == 0) {
-    SfbReportStatus (L"No FAT32 volumes found",
+    SfbReportStatus (SfbStr (StrNoFatVolumes),
                      EFI_ERROR (Status) ? Status : EFI_NOT_FOUND);
     if (Volumes != NULL) {
       FreePool (Volumes);
@@ -587,7 +585,7 @@ SfbRunFileBrowser (VOID)
 
   Rows = AllocateZeroPool (VolumeCount * sizeof (*Rows));
   if (Rows == NULL) {
-    SfbReportStatus (L"Out of memory", EFI_OUT_OF_RESOURCES);
+    SfbReportStatus (SfbStr (StrOutOfMemory), EFI_OUT_OF_RESOURCES);
     FreePool (Volumes);
     return;
   }
@@ -615,10 +613,13 @@ SfbRunFileBrowser (VOID)
 
     if (Label[0] == L'\0') {
       UnicodeSPrint (Rows[Index].Label, sizeof (Rows[Index].Label),
-                     L"Volume %u", (UINT32)Index);
+                     SfbStr (StrVolumeFmt), (UINT32)Index);
     } else {
       UnicodeSPrint (Rows[Index].Label, sizeof (Rows[Index].Label),
-                     L"Volume %u: %s", (UINT32)Index, Label);
+                     SfbStr (StrVolumeFmt), (UINT32)Index);
+      StrnCatS (Rows[Index].Label, SFB_DESC_CHARS, L": ", 2);
+      StrnCatS (Rows[Index].Label, SFB_DESC_CHARS, Label,
+                SFB_DESC_CHARS - StrLen (Rows[Index].Label) - 1);
     }
   }
 
@@ -628,29 +629,36 @@ SfbRunFileBrowser (VOID)
   while (TRUE) {
     UINTN    Start;
     UINTN    Last;
+    UINTN    Visible;
     SFB_KEY  Key;
 
-    SfbBeginScreen (L"EFI Program Selector", L"Choose a FAT32 volume to browse.");
+    SfbBeginScreen (SfbStr (StrEfiProgramSelector),
+                    SfbStr (StrEfiProgramHint));
 
-    Start = SfbWindowStart (Cursor, RowCount, SFB_VISIBLE_ROWS);
-    Last = Start + SFB_VISIBLE_ROWS;
+    Visible = SfbVisibleRows ();
+    Start = SfbWindowStart (Cursor, RowCount, Visible);
+    Last = Start + Visible;
     if (Last > RowCount) {
       Last = RowCount;
     }
 
     for (Index = Start; Index < Last; Index++) {
       if (Index == VolumeCount) {
-        SfbDrawRow ((BOOLEAN)(Index == Cursor), L" ", L"Back");
+        SfbDrawRow ((BOOLEAN)(Index == Cursor), L" ", SfbStr (StrBack));
       } else {
         SfbDrawRow ((BOOLEAN)(Index == Cursor), L"[V]", Rows[Index].Label);
       }
     }
 
     if (Last < RowCount) {
-      Print (L"    ... %u more\r\n", (UINT32)(RowCount - Last));
+      CHAR16  Note[32];
+
+      UnicodeSPrint (Note, sizeof (Note), SfbStr (StrMore),
+                     (UINT32)(RowCount - Last));
+      SfbPanelNote (Note);
     }
 
-    SfbEndScreen (L"Vol Up/Down: move   Power: select");
+    SfbEndScreen (SfbStr (StrKeyNavSelect));
 
     Key = SfbWaitForKey (0);
     if (Key == SfbKeyUp || Key == SfbKeyDown) {

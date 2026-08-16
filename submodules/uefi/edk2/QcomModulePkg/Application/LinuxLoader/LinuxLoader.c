@@ -78,6 +78,8 @@
 #include <Protocol/EFICardInfo.h>
 #include <Protocol/SimpleTextIn.h>
 #include "SuperFbMenu.h"
+#include "SuperFbGfx.h"
+#include "SuperFbSettings.h"
 
 #define MAX_APP_STR_LEN 64
 #define MAX_NUM_FS 10
@@ -227,7 +229,16 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
   }
 
   {
-    UINT8  MenuRequested;
+    UINT8         MenuRequested;
+    SFB_SETTINGS  Settings;
+
+    /*
+     * TEMPORARY TEST BEHAVIOUR: with this set to 1 the loader always opens
+     * the boot menu and never launches a saved default entry, so the BDS can
+     * be exercised on a live device.  Flip back to 0 to restore the default
+     * boot (still controllable from Settings -> Boot to Menu on power-on).
+     */
+#define SFB_TEST_ALWAYS_BOOTMENU  1
 
     /*
      * Scan for Volume Up held at power-on FIRST, before any other init disturbs
@@ -250,12 +261,35 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
       DEBUG ((EFI_D_ERROR, "Unable to start the FAT stack: %r\n", Status));
     }
 
+    /* Load persistent settings from the efisp tail record (best effort). */
+    Status = SfbSettingsLoad ();
+    if (EFI_ERROR (Status)) {
+      DEBUG ((EFI_D_INFO, "SFB: settings unavailable, using defaults: %r\n",
+              Status));
+    }
+
+    /* Bring up the graphical UI when the platform offers a GOP; the text
+     * console UI is used otherwise. */
+    SfbGfxInit ();
+
+    SfbSettingsGet (&Settings);
+    if (SFB_TEST_ALWAYS_BOOTMENU || Settings.BootToMenu) {
+      MenuRequested = 1;
+    }
+
     if (!MenuRequested) {
       /* No menu key: boot the saved default. This does not return on success;
        * it only comes back if there is no saved default or the launch failed,
        * in which case the menu is shown so the user is never stranded. */
       SfbLaunchDefaultEntry ();
     }
+
+    /*
+     * Reached here only when the menu is about to be shown.  Enforce the PIN
+     * lock before letting anyone in; the gate loops until it is satisfied (or
+     * the PIN is disabled), so it only returns once entry is authorised.
+     */
+    SfbRunPinGate ();
 
     /*
      * Reached here because the menu was requested, or there was no default to

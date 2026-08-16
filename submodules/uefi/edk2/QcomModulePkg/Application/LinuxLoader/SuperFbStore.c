@@ -2,12 +2,12 @@
  * Persistent settings for the super-fastboot boot menu.
  *
  * The firmware refuses EFI variables it does not already know about, so the
- * menu keeps its two settings in the EFI System Partition instead. Only the
+ * menu keeps its settings in the EFI System Partition instead. Only the
  * last megabyte of that partition is safe to write, so the store sits at the
- * very end of it: two 1 KiB NUL-padded ASCII records, back to back, ending on
- * the partition's last byte.
+ * very end of it: three 1 KiB NUL-padded ASCII records, back to back, ending
+ * on the partition's last byte.
  *
- *   [ ... file system ... | 1 MiB scratch ... | rec 0 | rec 1 ] end of ESP
+ *   [ ... file system ... | 1 MiB scratch ... | rec 0 | rec 1 | rec 2 ] end
  *
  * Nothing here goes through the file system: the records must survive the ESP
  * being written by an operating system that knows nothing about them, and a

@@ -10,6 +10,7 @@
  */
 
 #include "SuperFbMenu.h"
+#include "SuperFbLang.h"
 
 #include <Library/BaseLib.h>
 #include <Library/BaseMemoryLib.h>
@@ -790,10 +791,11 @@ SfbBuildMenu (OUT SFB_MENU_STATE *Menu)
   SfbScanVolumes (Menu);
   SfbAppendCustomEntry (Menu);
 
-  SfbAppendBuiltIn (Menu, SfbEntryFastboot, L"Enter Fastboot");
-  SfbAppendBuiltIn (Menu, SfbEntrySelector, L"Enter EFI Program Selector");
-  SfbAppendBuiltIn (Menu, SfbEntryPowerOff, L"Power Off");
-  SfbAppendBuiltIn (Menu, SfbEntryRestart, L"Restart");
+  SfbAppendBuiltIn (Menu, SfbEntryFastboot, SfbStr (StrEnterFastboot));
+  SfbAppendBuiltIn (Menu, SfbEntrySelector, SfbStr (StrEfiProgramSelector));
+  SfbAppendBuiltIn (Menu, SfbEntrySettings, SfbStr (StrSettings));
+  SfbAppendBuiltIn (Menu, SfbEntryPowerOff, SfbStr (StrPowerOff));
+  SfbAppendBuiltIn (Menu, SfbEntryRestart, SfbStr (StrRestart));
 
   SfbResolveDefault (Menu);
 }
