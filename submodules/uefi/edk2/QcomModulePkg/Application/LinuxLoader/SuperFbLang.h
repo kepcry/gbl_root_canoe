@@ -42,7 +42,6 @@ typedef enum {
   StrBootTemporary,
   StrAddToBootMenu,
   StrEfiProgramSelector,
-  StrEfiProgramHint,
   StrEfiDriver,
   StrEfiApplication,
   StrPressPower,

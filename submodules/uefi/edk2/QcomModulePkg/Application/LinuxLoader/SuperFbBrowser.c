@@ -632,8 +632,8 @@ SfbRunFileBrowser (VOID)
     UINTN    Visible;
     SFB_KEY  Key;
 
-    SfbBeginScreen (SfbStr (StrEfiProgramSelector),
-                    SfbStr (StrEfiProgramHint));
+    /* The volume list is self-explanatory; no subtitle is drawn. */
+    SfbBeginScreen (SfbStr (StrEfiProgramSelector), NULL);
 
     Visible = SfbVisibleRows ();
     Start = SfbWindowStart (Cursor, RowCount, Visible);

@@ -36,7 +36,6 @@ STATIC CONST SFB_LANG_STRING  mSfbStrings[StrCount] = {
   { L"Boot (temporary)",                L"启动（临时）" },
   { L"Add to BootMenu",                 L"添加到启动菜单" },
   { L"EFI Program Selector",            L"EFI 程序选择器" },
-  { L"Choose a FAT32 volume to browse.", L"选择一个 FAT32 卷进行浏览。" },
   { L"EFI Driver",                      L"EFI 驱动" },
   { L"EFI Application",                 L"EFI 应用程序" },
   { L"Press power to continue.",        L"按电源键继续。" },
