@@ -9,7 +9,7 @@
 
 BOOLEAN
 SfbFontGetGlyph (IN CHAR16 Ch,
-                 OUT UINT16 *Offset,
+                 OUT UINT32 *Offset,
                  OUT UINT8  *Width,
                  OUT UINT8  *Advance)
 {

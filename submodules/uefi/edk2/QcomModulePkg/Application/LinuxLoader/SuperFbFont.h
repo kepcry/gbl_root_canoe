@@ -24,7 +24,7 @@
 
 typedef struct {
   CHAR16  Ch;        /* Unicode code point */
-  UINT16  Offset;    /* byte offset into gSfbFontBitmap */
+  UINT32  Offset;    /* byte offset into gSfbFontBitmap */
   UINT8   Width;     /* glyph width in pixels (even) */
   UINT8   Advance;   /* pen advance in pixels (includes side padding) */
 } SFB_FONT_GLYPH;
@@ -40,7 +40,7 @@ extern CONST SFB_FONT_GLYPH gSfbFontGlyphs[];
  */
 BOOLEAN
 SfbFontGetGlyph (IN CHAR16 Ch,
-                 OUT UINT16 *Offset,
+                 OUT UINT32 *Offset,
                  OUT UINT8  *Width,
                  OUT UINT8  *Advance);
 

@@ -131,7 +131,7 @@ SfbGfxTextWidth (IN CONST CHAR16 *Text)
   UINTN   Index;
 
   for (Index = 0; Text[Index] != L'\0'; Index++) {
-    UINT16  Offset;
+    UINT32  Offset;
     UINT8   GlyphWidth;
     UINT8   Advance;
 
@@ -161,7 +161,7 @@ SfbGfxBlendGlyph (IN OUT EFI_GRAPHICS_OUTPUT_BLT_PIXEL *Row,
 {
   EFI_GRAPHICS_OUTPUT_BLT_PIXEL  FgPix;
   EFI_GRAPHICS_OUTPUT_BLT_PIXEL  BgPix;
-  UINT16                         Offset;
+  UINT32                         Offset;
   UINT8                          GlyphWidth;
   UINT8                          GlyphAdvance;
   UINT32                         X;
@@ -245,7 +245,7 @@ SfbGfxDrawText (IN CONST CHAR16 *Text,
   while (TRUE) {
     RowWidth = 0;
     for (Index = 0; Index < Length; Index++) {
-      UINT16  Offset;
+      UINT32  Offset;
       UINT8   GlyphWidth;
       UINT8   Advance;
 
