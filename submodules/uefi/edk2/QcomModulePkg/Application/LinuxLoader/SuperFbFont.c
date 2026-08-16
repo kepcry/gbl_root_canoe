@@ -8,7 +8,10 @@
 #include "SuperFbFont.h"
 
 BOOLEAN
-SfbFontGetGlyph (IN CHAR16 Ch, OUT UINT16 *Offset)
+SfbFontGetGlyph (IN CHAR16 Ch,
+                 OUT UINT16 *Offset,
+                 OUT UINT8  *Width,
+                 OUT UINT8  *Advance)
 {
   UINTN  Index;
 
@@ -16,6 +19,12 @@ SfbFontGetGlyph (IN CHAR16 Ch, OUT UINT16 *Offset)
     if (gSfbFontGlyphs[Index].Ch == Ch) {
       if (Offset != NULL) {
         *Offset = gSfbFontGlyphs[Index].Offset;
+      }
+      if (Width != NULL) {
+        *Width = gSfbFontGlyphs[Index].Width;
+      }
+      if (Advance != NULL) {
+        *Advance = gSfbFontGlyphs[Index].Advance;
       }
       return TRUE;
     }

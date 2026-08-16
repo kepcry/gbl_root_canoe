@@ -60,10 +60,9 @@ SfbGfxHLine (IN UINT32 Y,
              IN UINT32 Color);
 
 /*
- * Draw a string with the embedded font starting at (X, Y).  Every character
- * occupies a fixed SFB_FONT_CELL_W x SFB_FONT_CELL_H cell; characters missing
- * from the font table are drawn as a hollow placeholder box.  The string is
- * clipped at the right edge of the screen.
+ * Draw a string with the embedded proportional font starting at (X, Y).
+ * Characters missing from the font table are drawn as a hollow placeholder
+ * box.  The string is clipped at the right edge of the screen.
  */
 VOID
 SfbGfxDrawText (IN CONST CHAR16 *Text,

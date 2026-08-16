@@ -1,8 +1,12 @@
 ﻿# Generates SuperFbFontData.c from the UI strings in SuperFbLang.c.
 #
 # Renders every unique character used by the BDS UI with Noto Sans SC at 2x
-# resolution, downsamples to a 24x24 cell and stores 4-bit anti-aliased alpha
-# (2 pixels per byte).  Run on Windows with PowerShell 5.1+:
+# resolution, downsamples to a 32px-tall cell and stores 4-bit anti-aliased
+# alpha (2 pixels per byte).  Glyphs are proportional: each glyph keeps only
+# its ink width plus 2px and records its own advance, so Latin text is not
+# spaced like a full-width grid.  The full printable ASCII range is always
+# included, so runtime characters (PIN digits, '>' and '*' markers) can never
+# come out as placeholder boxes.
 #
 #   powershell -ExecutionPolicy Bypass -File gen_sfb_font.ps1
 #
@@ -11,13 +15,15 @@
 
 $ErrorActionPreference = 'Stop'
 
-$FontName      = 'Noto Sans SC'
-$CellSize      = 24
-$Grid          = $CellSize * 2          # 48x48 downsample source grid
-$RenderSize    = 80                     # tall render canvas (no top clipping)
-$FontPx        = 40
-$AlphaLevels   = 16
-$CellBaseline  = 36                     # baseline row in the 48 grid (cell row 18)
+$FontName     = 'Noto Sans SC'
+$CellHeight   = 32
+$Grid         = $CellHeight * 2          # 64x64 downsample source grid
+$RenderSize   = 100                      # tall render canvas (no top clipping)
+$FontPx       = 52
+$AlphaLevels  = 16
+$CellBaseline = 48                       # baseline row in the 64 grid (cell row 24)
+$AdvancePad   = 2                        # side padding added to the ink width
+$SpaceAdvance = 12                       # advance for the space character
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $SrcFile = Join-Path $RepoRoot 'submodules\uefi\edk2\QcomModulePkg\Application\LinuxLoader\SuperFbLang.c'
@@ -29,7 +35,7 @@ if (!(Test-Path $SrcFile)) {
 
 Add-Type -AssemblyName System.Drawing
 
-# ---- collect every character used in L"..." literals -----------------------
+# ---- collect characters: ASCII range + everything used in L"..." literals --
 $text = [System.IO.File]::ReadAllText($SrcFile, [System.Text.Encoding]::UTF8)
 $matches = [regex]::Matches($text, 'L"((?:[^"\\]|\\.)*)"')
 if ($matches.Count -eq 0) {
@@ -37,6 +43,9 @@ if ($matches.Count -eq 0) {
 }
 
 $chars = New-Object 'System.Collections.Generic.HashSet[char]'
+for ($code = 0x20; $code -le 0x7E; $code++) {
+    [void]$chars.Add([char]$code)
+}
 foreach ($m in $matches) {
     $s = $m.Groups[1].Value
     for ($i = 0; $i -lt $s.Length; $i++) {
@@ -79,8 +88,8 @@ $BaselineY = Measure-Baseline
 if ($BaselineY -lt 0) { Write-Error 'Could not measure the font baseline' }
 Write-Host ("Render baseline at y={0}, cell baseline row {1}" -f $BaselineY, ($CellBaseline / 2))
 
-# ---- render one character into a packed 4-bit 24x24 glyph -----------------
-function Get-GlyphBytes([char]$Ch) {
+# ---- render one character into a packed 4-bit proportional glyph -----------
+function Get-Glyph([char]$Ch) {
     $bmp = New-Object System.Drawing.Bitmap -ArgumentList $RenderSize, $RenderSize, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
@@ -113,27 +122,33 @@ function Get-GlyphBytes([char]$Ch) {
         }
     }
 
-    $out = New-Object byte[] (($CellSize * $CellSize) / 2)
-    if ($maxX -lt 0) { return ,$out }
+    if ($maxX -lt 0) {
+        # Blank glyph (e.g. space): a couple of empty pixels wide.
+        $advance = if ([int]$Ch -eq 0x20) { $SpaceAdvance } else { 8 }
+        return @{ Bytes = (New-Object byte[] (2 * $CellHeight / 2)); Width = 2; Advance = $advance }
+    }
 
     $w = $maxX - $minX + 1
+    if (($w % 2) -ne 0) { $w++ }          # packing needs an even width
     $h = $maxY - $minY + 1
     $pasteX = [Math]::Floor(($Grid - $w) / 2)
     $pasteY = $CellBaseline - ($BaselineY - $minY)
 
-    # The glyph must sit fully inside the 48 grid with its baseline on the
-    # fixed baseline row; otherwise the cell would clip it.
     if ($pasteY -lt 0 -or $pasteY + $h -gt $Grid) {
         Write-Host ("WARNING: glyph U+{0:X4} does not fit the cell (y {1}..{2})" -f [int]$Ch, $pasteY, ($pasteY + $h - 1))
     }
 
-    for ($y = 0; $y -lt $CellSize; $y++) {
-        for ($x = 0; $x -lt $CellSize; $x++) {
+    $out = New-Object byte[] (($w * $CellHeight) / 2)
+    for ($y = 0; $y -lt $CellHeight; $y++) {
+        for ($x = 0; $x -lt $w; $x++) {
             $sum = 0
             for ($jy = 0; $jy -lt 2; $jy++) {
                 for ($jx = 0; $jx -lt 2; $jx++) {
-                    # Map the 48-grid pixel back onto the render-canvas ink.
-                    $px = $x * 2 + $jx - $pasteX + $minX
+                    # Horizontal: the cell is exactly as wide as the ink, so
+                    # cell column x maps straight to render column minX+2x.
+                    # Vertical: the 32px cell is taller than most glyphs, so
+                    # the pasteY offset is needed to anchor the baseline.
+                    $px = $minX + $x * 2 + $jx
                     $py = $y * 2 + $jy - $pasteY + $minY
                     if ($px -ge 0 -and $px -lt $RenderSize -and $py -ge 0 -and $py -lt $RenderSize) {
                         $sum += $bytes[$py * $stride + $px * 4 + 3]
@@ -141,7 +156,7 @@ function Get-GlyphBytes([char]$Ch) {
                 }
             }
             $alpha = [Math]::Min($AlphaLevels - 1, [Math]::Floor($sum / 4 / 16))
-            $idx = $y * $CellSize + $x
+            $idx = $y * $w + $x
             $byteIdx = [int][Math]::Floor($idx / 2)
             if (($idx % 2) -eq 0) {
                 $out[$byteIdx] = $alpha -shl 4
@@ -150,14 +165,17 @@ function Get-GlyphBytes([char]$Ch) {
             }
         }
     }
-    return ,$out
+
+    $advance = $w + $AdvancePad
+    if ($advance -gt $Grid) { $advance = $Grid }
+    return @{ Bytes = $out; Width = $w; Advance = $advance }
 }
 
 # ---- build the C source -----------------------------------------------------
 $sb = New-Object System.Text.StringBuilder
 [void]$sb.AppendLine('/*')
 [void]$sb.AppendLine(' * Generated by tools/gen_sfb_font/gen_sfb_font.ps1 - do not edit by hand.')
-[void]$sb.AppendLine(" * Font: $FontName, $CellSize x $CellSize cell, 4-bit anti-aliased alpha.")
+[void]$sb.AppendLine(" * Font: $FontName, ${CellHeight}px tall proportional cells, 4-bit anti-aliased alpha.")
 [void]$sb.AppendLine(' */')
 [void]$sb.AppendLine('')
 [void]$sb.AppendLine('#include "SuperFbFont.h"')
@@ -168,11 +186,11 @@ $offset = 0
 $glyphs = New-Object System.Collections.Generic.List[string]
 $row = New-Object System.Collections.Generic.List[string]
 foreach ($ch in $sorted) {
-    $glyph = Get-GlyphBytes $ch
-    [void]$glyphs.Add(('{{ 0x{0:X4}, {1} }}' -f [int]$ch, $offset))
-    $offset += $glyph.Length
-    for ($i = 0; $i -lt $glyph.Length; $i++) {
-        [void]$row.Add(('0x{0:X2}' -f $glyph[$i]))
+    $glyph = Get-Glyph $ch
+    [void]$glyphs.Add(('{{ 0x{0:X4}, {1}, {2}, {3} }}' -f [int]$ch, $offset, $glyph.Width, $glyph.Advance))
+    $offset += $glyph.Bytes.Length
+    for ($i = 0; $i -lt $glyph.Bytes.Length; $i++) {
+        [void]$row.Add(('0x{0:X2}' -f $glyph.Bytes[$i]))
         if ($row.Count -eq 16) {
             [void]$sb.AppendLine('  ' + ($row -join ', ') + ',')
             $row.Clear()

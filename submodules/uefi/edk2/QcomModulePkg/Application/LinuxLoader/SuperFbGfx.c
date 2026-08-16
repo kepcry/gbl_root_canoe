@@ -127,50 +127,71 @@ SfbGfxHLine (IN UINT32 Y,
 UINT32
 SfbGfxTextWidth (IN CONST CHAR16 *Text)
 {
-  return (UINT32)(StrLen (Text) * SFB_FONT_CELL_W);
+  UINT32  Width = 0;
+  UINTN   Index;
+
+  for (Index = 0; Text[Index] != L'\0'; Index++) {
+    UINT16  Offset;
+    UINT8   GlyphWidth;
+    UINT8   Advance;
+
+    if (SfbFontGetGlyph (Text[Index], &Offset, &GlyphWidth, &Advance)) {
+      Width += Advance;
+    } else {
+      Width += SFB_FONT_CELL_H / 2;
+    }
+  }
+
+  return Width;
 }
 
 /*
- * Blend one glyph cell into a row buffer.  Alpha is 4-bit; a missing glyph
- * is drawn as a hollow box.
+ * Blend one proportional glyph into a row buffer.  Alpha is 4-bit; a missing
+ * glyph is drawn as a hollow box.
  */
 STATIC
 VOID
 SfbGfxBlendGlyph (IN OUT EFI_GRAPHICS_OUTPUT_BLT_PIXEL *Row,
                   IN UINT32                            RowWidth,
-                  IN UINT32                            CellX,
+                  IN UINT32                            PenX,
                   IN CHAR16                            Ch,
                   IN UINT32                            Fg,
-                  IN UINT32                            Bg)
+                  IN UINT32                            Bg,
+                  OUT UINT32                           *Advance)
 {
   EFI_GRAPHICS_OUTPUT_BLT_PIXEL  FgPix;
   EFI_GRAPHICS_OUTPUT_BLT_PIXEL  BgPix;
   UINT16                         Offset;
+  UINT8                          GlyphWidth;
+  UINT8                          GlyphAdvance;
   UINT32                         X;
   UINT32                         Y;
 
   SfbGfxPixel (&FgPix, Fg);
   SfbGfxPixel (&BgPix, Bg);
 
-  if (!SfbFontGetGlyph (Ch, &Offset)) {
+  if (!SfbFontGetGlyph (Ch, &Offset, &GlyphWidth, &GlyphAdvance)) {
     /* Hollow placeholder box for characters outside the font table. */
-    for (X = 0; X < SFB_FONT_CELL_W; X++) {
-      Row[CellX + X] = FgPix;
-      Row[CellX + X + (SFB_FONT_CELL_H - 1) * RowWidth] = FgPix;
+    UINT32  BoxW = SFB_FONT_CELL_H / 2;
+
+    for (X = 0; X < BoxW; X++) {
+      Row[PenX + X] = FgPix;
+      Row[PenX + X + (SFB_FONT_CELL_H - 1) * RowWidth] = FgPix;
     }
     for (Y = 0; Y < SFB_FONT_CELL_H; Y++) {
-      Row[CellX + Y * RowWidth] = FgPix;
-      Row[CellX + SFB_FONT_CELL_W - 1 + Y * RowWidth] = FgPix;
+      Row[PenX + Y * RowWidth] = FgPix;
+      Row[PenX + BoxW - 1 + Y * RowWidth] = FgPix;
     }
+    *Advance = BoxW;
     return;
   }
 
   for (Y = 0; Y < SFB_FONT_CELL_H; Y++) {
-    for (X = 0; X < SFB_FONT_CELL_W; X++) {
-      UINTN   BitIndex = Y * SFB_FONT_CELL_W + X;
+    for (X = 0; X < GlyphWidth; X++) {
+      UINTN   BitIndex = Y * GlyphWidth + X;
       UINT8   Alpha = (UINT8)(gSfbFontBitmap[Offset + BitIndex / 2] >>
                               ((BitIndex & 1) ? 0 : 4)) & 0xF;
-      UINTN   Dest = CellX + X + Y * RowWidth;
+      UINTN   Dest = PenX + X + Y * RowWidth;
 
       if (Alpha == SFB_FONT_MAX_ALPHA) {
         Row[Dest] = FgPix;
@@ -187,6 +208,8 @@ SfbGfxBlendGlyph (IN OUT EFI_GRAPHICS_OUTPUT_BLT_PIXEL *Row,
       }
     }
   }
+
+  *Advance = GlyphAdvance;
 }
 
 VOID
@@ -199,8 +222,9 @@ SfbGfxDrawText (IN CONST CHAR16 *Text,
   EFI_GRAPHICS_OUTPUT_BLT_PIXEL  *Row;
   UINTN                           Length;
   UINTN                           RowWidth;
-  UINTN                           MaxChars;
+  UINTN                           MaxWidth;
   UINTN                           Index;
+  UINT32                          PenX;
 
   if (!SfbGfxActive ()) {
     return;
@@ -212,15 +236,31 @@ SfbGfxDrawText (IN CONST CHAR16 *Text,
   }
 
   /* Clip at the right edge of the screen. */
-  MaxChars = (mSfbScreenW > X) ? (mSfbScreenW - X) / SFB_FONT_CELL_W : 0;
-  if (MaxChars == 0) {
+  MaxWidth = (mSfbScreenW > X) ? mSfbScreenW - X : 0;
+  if (MaxWidth == 0) {
     return;
   }
-  if (Length > MaxChars) {
-    Length = MaxChars;
+
+  /* Measure, then drop characters from the end until the text fits. */
+  while (TRUE) {
+    RowWidth = 0;
+    for (Index = 0; Index < Length; Index++) {
+      UINT16  Offset;
+      UINT8   GlyphWidth;
+      UINT8   Advance;
+
+      if (SfbFontGetGlyph (Text[Index], &Offset, &GlyphWidth, &Advance)) {
+        RowWidth += Advance;
+      } else {
+        RowWidth += SFB_FONT_CELL_H / 2;
+      }
+    }
+    if (RowWidth <= MaxWidth || Length <= 1) {
+      break;
+    }
+    Length--;
   }
 
-  RowWidth = Length * SFB_FONT_CELL_W;
   Row = AllocateZeroPool (RowWidth * SFB_FONT_CELL_H * sizeof (*Row));
   if (Row == NULL) {
     return;
@@ -237,9 +277,13 @@ SfbGfxDrawText (IN CONST CHAR16 *Text,
     }
   }
 
+  PenX = 0;
   for (Index = 0; Index < Length; Index++) {
-    SfbGfxBlendGlyph (Row, (UINT32)RowWidth, (UINT32)(Index * SFB_FONT_CELL_W),
-                      Text[Index], Fg, Bg);
+    UINT32  Advance;
+
+    SfbGfxBlendGlyph (Row, (UINT32)RowWidth, PenX, Text[Index], Fg, Bg,
+                      &Advance);
+    PenX += Advance;
   }
 
   mSfbGop->Blt (mSfbGop, Row, EfiBltBufferToVideo, 0, 0, X, Y,

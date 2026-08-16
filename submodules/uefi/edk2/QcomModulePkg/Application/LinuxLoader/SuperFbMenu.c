@@ -325,7 +325,7 @@ SfbPanelNote (IN CONST CHAR16 *Text)
 STATIC UINT32  gSfbGfxPanelTop    = 0;
 STATIC UINT32  gSfbGfxPanelH      = 0;
 STATIC UINT32  gSfbGfxRowsStart   = 0;
-STATIC UINT32  gSfbGfxRowH        = 40;
+STATIC UINT32  gSfbGfxRowH        = 52;
 STATIC UINT32  gSfbGfxFooterY     = 0;
 STATIC UINTN   gSfbGfxRowIndex    = 0;
 STATIC UINTN   gSfbGfxVisibleRows = SFB_VISIBLE_ROWS;
@@ -444,7 +444,8 @@ SfbGfxPanelRow (IN BOOLEAN Selected, IN CONST CHAR16 *Marker,
     StrnCpyS (Full, SFB_DESC_CHARS + 8, Text, SFB_DESC_CHARS + 7);
   }
 
-  MaxChars = W / SFB_FONT_CELL_W;
+  /* Proportional font: 8px is a safe minimum advance for the fit estimate. */
+  MaxChars = W / 8;
   if (MaxChars > SFB_DESC_CHARS + 4) {
     MaxChars = SFB_DESC_CHARS + 4;
   }
@@ -847,7 +848,7 @@ SfbGfxShowPinScreen (IN CONST CHAR16 *Title, IN CONST UINT8 *Digit,
   CHAR16  Ch[2];
 
   SfbGfxGetScreen (&W, &H);
-  CellW = 2 * SFB_FONT_CELL_W;
+  CellW = 56;
   Gap = 24;
   TotalW = SFB_PIN_DIGITS * CellW + (SFB_PIN_DIGITS - 1) * Gap;
   X0 = (W >= TotalW) ? (W - TotalW) / 2 : 0;
@@ -864,11 +865,11 @@ SfbGfxShowPinScreen (IN CONST CHAR16 *Title, IN CONST UINT8 *Digit,
 
     if (Index < Pos) {
       SfbGfxFillRect (CX, Y0, CellW, SFB_FONT_CELL_H + 12, SFB_COLOR_ACCENT_D);
-      SfbGfxDrawText (Ch, CX + (CellW - SFB_FONT_CELL_W) / 2, Y0 + 6,
+      SfbGfxDrawText (Ch, CX + (CellW - SfbGfxTextWidth (Ch)) / 2, Y0 + 6,
                       SFB_COLOR_BG, SFB_COLOR_ACCENT_D);
     } else if (Index == Pos) {
       SfbGfxFillRect (CX, Y0, CellW, SFB_FONT_CELL_H + 12, SFB_COLOR_ACCENT);
-      SfbGfxDrawText (Ch, CX + (CellW - SFB_FONT_CELL_W) / 2, Y0 + 6,
+      SfbGfxDrawText (Ch, CX + (CellW - SfbGfxTextWidth (Ch)) / 2, Y0 + 6,
                       SFB_COLOR_BG, SFB_COLOR_ACCENT);
     } else {
       SfbGfxFillRect (CX, Y0, CellW, SFB_FONT_CELL_H + 12, SFB_COLOR_PANEL);
