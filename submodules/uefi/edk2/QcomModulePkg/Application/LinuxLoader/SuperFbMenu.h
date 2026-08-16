@@ -360,8 +360,11 @@ SfbWaitForKey (IN UINT32 TimeoutMs);
 
 /* ---- shared console helpers (SuperFbMenu.c) ----------------------------- */
 
-/* Rows of list content a screen shows before it starts scrolling. */
-#define SFB_VISIBLE_ROWS  12
+/*
+ * Rows of list content a screen shows before it starts scrolling.  Kept low
+ * so the centred panel the list lives in stays around a third of the screen.
+ */
+#define SFB_VISIBLE_ROWS  8
 
 VOID
 SfbBeginScreen (IN CONST CHAR16 *Title, IN CONST CHAR16 *Subtitle OPTIONAL);
@@ -373,6 +376,10 @@ VOID
 SfbDrawRow (IN BOOLEAN      Selected,
             IN CONST CHAR16 *Marker,
             IN CONST CHAR16 *Text);
+
+/* Dim, left-aligned note inside the current panel ("... N more" and friends). */
+VOID
+SfbPanelNote (IN CONST CHAR16 *Text);
 
 /* First row of the visible window, chosen to keep Cursor inside it. */
 UINTN

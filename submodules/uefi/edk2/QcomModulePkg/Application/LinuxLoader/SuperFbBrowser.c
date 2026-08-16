@@ -488,11 +488,19 @@ SfbBrowseVolume (IN EFI_HANDLE   Volume,
     }
 
     if (Last < Count) {
-      Print (L"    ... %u more\r\n", (UINT32)(Count - Last));
+      CHAR16  Note[32];
+
+      UnicodeSPrint (Note, sizeof (Note), L"... %u more",
+                     (UINT32)(Count - Last));
+      SfbPanelNote (Note);
     }
     if (Truncated) {
-      Print (L"    (directory has more than %u entries; rest not shown)\r\n",
-             (UINT32)SFB_MAX_DIR_ENTRIES);
+      CHAR16  Note[64];
+
+      UnicodeSPrint (Note, sizeof (Note),
+                     L"(directory has more than %u entries; rest not shown)",
+                     (UINT32)SFB_MAX_DIR_ENTRIES);
+      SfbPanelNote (Note);
     }
 
     SfbEndScreen (L"Vol Up/Down: move   Power: open");

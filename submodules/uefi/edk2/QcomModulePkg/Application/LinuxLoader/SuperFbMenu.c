@@ -23,9 +23,16 @@
 /* Keeps the translation unit legal when the feature is compiled out. */
 CONST CHAR8 *gSfbMenuModuleTag = "SuperFbMenu";
 
+/*
+ * Lilac ("dingxiang") purple theme.  The UEFI text palette has no true pale
+ * purple, so the brightest magenta it offers (EFI_LIGHTMAGENTA) carries the
+ * accents and the darker magenta is used for the panel frame and hints.
+ */
 #define SFB_ATTR_NORMAL    EFI_TEXT_ATTR (EFI_LIGHTGRAY, EFI_BLACK)
-#define SFB_ATTR_SELECTED  EFI_TEXT_ATTR (EFI_BLACK, EFI_LIGHTGRAY)
-#define SFB_ATTR_TITLE     EFI_TEXT_ATTR (EFI_WHITE, EFI_BLACK)
+#define SFB_ATTR_SELECTED  EFI_TEXT_ATTR (EFI_BLACK, EFI_LIGHTMAGENTA)
+#define SFB_ATTR_TITLE     EFI_TEXT_ATTR (EFI_LIGHTMAGENTA, EFI_BLACK)
+#define SFB_ATTR_PANEL     EFI_TEXT_ATTR (EFI_MAGENTA, EFI_BLACK)
+#define SFB_ATTR_FOOTER    EFI_TEXT_ATTR (EFI_MAGENTA, EFI_BLACK)
 
 SFB_KEY
 SfbWaitForKey (IN UINT32 TimeoutMs)
@@ -105,34 +112,307 @@ SfbWaitForKey (IN UINT32 TimeoutMs)
 
 /* ---- drawing ------------------------------------------------------------ */
 
+/*
+ * Every screen is drawn as a bordered panel centred on the console.  The
+ * panel is sized to roughly a third of the screen (a third of the height, up
+ * to two thirds of the width) so the menu reads as one window in the middle
+ * of the display instead of a list glued to the top-left corner.  The
+ * console font itself is whatever the firmware provides; nothing here changes
+ * it, only the footprint the UI takes on screen.
+ */
+#define SFB_PANEL_MIN_WIDTH  44
+#define SFB_PANEL_MAX_WIDTH  60
+
+/* Geometry of the panel currently being drawn; SfbBeginScreen sets it and
+ * the row/footer helpers read it until SfbEndScreen closes the panel. */
+STATIC UINTN  gSfbPanelWidth  = 0;
+STATIC UINTN  gSfbPanelLeft   = 0;
+STATIC UINTN  gSfbPanelExtra  = 0;
+
+STATIC
+VOID
+SfbScreenSize (OUT UINTN *Columns, OUT UINTN *Rows)
+{
+  UINTN  Cols = 0;
+  UINTN  Rs   = 0;
+
+  if (gST->ConOut->Mode != NULL) {
+    Cols = gST->ConOut->Mode->Columns;
+    Rs   = gST->ConOut->Mode->Rows;
+    if ((Cols == 0 || Rs == 0) && gST->ConOut->QueryMode != NULL) {
+      gST->ConOut->QueryMode (gST->ConOut, gST->ConOut->Mode->Mode,
+                              &Cols, &Rs);
+    }
+  }
+
+  *Columns = (Cols == 0) ? 80 : Cols;
+  *Rows    = (Rs   == 0) ? 30 : Rs;
+}
+
+STATIC
+UINTN
+SfbPanelWidth (VOID)
+{
+  UINTN  Cols;
+  UINTN  Rows;
+  UINTN  Width;
+
+  SfbScreenSize (&Cols, &Rows);
+  Width = Cols * 2 / 3;
+  if (Width > SFB_PANEL_MAX_WIDTH) {
+    Width = SFB_PANEL_MAX_WIDTH;
+  }
+  if (Width < SFB_PANEL_MIN_WIDTH) {
+    Width = SFB_PANEL_MIN_WIDTH;
+  }
+  if (Width > Cols - 2) {
+    Width = (Cols > 2) ? Cols - 2 : 1;
+  }
+
+  return Width;
+}
+
+STATIC
+VOID
+SfbPrintLeftPad (VOID)
+{
+  UINTN  Index;
+  UINTN  Left = gSfbPanelLeft;
+
+  for (Index = 0; Index < Left; Index++) {
+    Print (L" ");
+  }
+}
+
+/* Print one full-width line of the panel: purple frame, Inner (which must be
+ * exactly Width - 2 characters wide) in Attr. */
+STATIC
+VOID
+SfbPanelLine (IN CONST CHAR16 *Inner, IN UINTN Attr)
+{
+  SfbPrintLeftPad ();
+  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_PANEL);
+  Print (L"|");
+  gST->ConOut->SetAttribute (gST->ConOut, Attr);
+  Print (L"%s", Inner);
+  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_PANEL);
+  Print (L"|\r\n");
+  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
+}
+
+STATIC
+VOID
+SfbPanelBorder (VOID)
+{
+  UINTN  Index;
+  UINTN  Width = gSfbPanelWidth;
+
+  SfbPrintLeftPad ();
+  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_PANEL);
+  Print (L"+");
+  for (Index = 1; Index + 1 < Width; Index++) {
+    Print (L"-");
+  }
+  Print (L"+\r\n");
+  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
+}
+
+STATIC
+VOID
+SfbPanelBlank (VOID)
+{
+  CHAR16  Inner[SFB_PANEL_MAX_WIDTH + 1];
+  UINTN   Width = gSfbPanelWidth;
+  UINTN   Index;
+
+  for (Index = 0; Index + 2 < Width; Index++) {
+    Inner[Index] = L' ';
+  }
+  Inner[Index] = L'\0';
+
+  SfbPanelLine (Inner, SFB_ATTR_NORMAL);
+}
+
+STATIC
+VOID
+SfbPanelCentered (IN CONST CHAR16 *Text, IN UINTN Attr)
+{
+  CHAR16  Inner[SFB_PANEL_MAX_WIDTH + 1];
+  UINTN   Width = gSfbPanelWidth;
+  UINTN   InnerWidth;
+  UINTN   Length;
+  UINTN   Pad;
+  UINTN   Index;
+
+  InnerWidth = (Width >= 2) ? Width - 2 : 0;
+  Length = StrLen (Text);
+  if (Length > InnerWidth) {
+    Length = InnerWidth;
+  }
+  Pad = InnerWidth - Length;
+
+  Index = 0;
+  while (Index < Pad / 2) {
+    Inner[Index++] = L' ';
+  }
+  CopyMem (&Inner[Index], Text, Length * sizeof (CHAR16));
+  Index += Length;
+  while (Index < InnerWidth) {
+    Inner[Index++] = L' ';
+  }
+  Inner[Index] = L'\0';
+
+  SfbPanelLine (Inner, Attr);
+}
+
+STATIC
+VOID
+SfbPanelText (IN CONST CHAR16 *Text, IN UINTN Attr)
+{
+  CHAR16  Inner[SFB_PANEL_MAX_WIDTH + 1];
+  UINTN   Width = gSfbPanelWidth;
+  UINTN   InnerWidth;
+  UINTN   Length;
+  UINTN   Index;
+
+  InnerWidth = (Width >= 2) ? Width - 2 : 0;
+  Length = StrLen (Text);
+  if (InnerWidth > 1 && Length > InnerWidth - 1) {
+    Length = InnerWidth - 1;
+  }
+
+  Index = 0;
+  Inner[Index++] = L' ';
+  CopyMem (&Inner[Index], Text, Length * sizeof (CHAR16));
+  Index += Length;
+  while (Index < InnerWidth) {
+    Inner[Index++] = L' ';
+  }
+  Inner[Index] = L'\0';
+
+  SfbPanelLine (Inner, Attr);
+}
+
+/* Dim, left-aligned note inside the panel ("... N more" and friends). */
+VOID
+SfbPanelNote (IN CONST CHAR16 *Text)
+{
+  SfbPanelText (Text, SFB_ATTR_FOOTER);
+}
+
 VOID
 SfbBeginScreen (IN CONST CHAR16 *Title, IN CONST CHAR16 *Subtitle)
 {
+  UINTN  Cols;
+  UINTN  Rows;
+  UINTN  Content;
+  UINTN  Top;
+
   gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_TITLE);
   gST->ConOut->ClearScreen (gST->ConOut);
-  Print (L"%s\r\n", Title);
-  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
+  gST->ConOut->EnableCursor (gST->ConOut, FALSE);
+
+  SfbScreenSize (&Cols, &Rows);
+  gSfbPanelWidth = SfbPanelWidth ();
+  gSfbPanelLeft  = (Cols - gSfbPanelWidth) / 2;
+
+  /*
+   * Fixed chrome: top border, blank, title, blank, [subtitle, blank], the
+   * visible list rows, blank, footer and bottom border.  The panel is then
+   * grown to at least a third of the screen height so it reads as a centred
+   * window no matter how short the list is.
+   */
+  Content = SFB_VISIBLE_ROWS + 7;
   if (Subtitle != NULL) {
-    Print (L"%s\r\n", Subtitle);
+    Content += 2;
   }
-  Print (L"\r\n");
+  if (Content < Rows / 3) {
+    Content = Rows / 3;
+  }
+  gSfbPanelExtra = Content - (SFB_VISIBLE_ROWS + 7
+                              + ((Subtitle != NULL) ? 2 : 0));
+  Top = (Content >= Rows) ? 0 : (Rows - Content) / 2;
+
+  while (Top-- > 0) {
+    Print (L"\r\n");
+  }
+
+  SfbPanelBorder ();
+  SfbPanelBlank ();
+  SfbPanelCentered (Title, SFB_ATTR_TITLE);
+  SfbPanelBlank ();
+  if (Subtitle != NULL) {
+    SfbPanelCentered (Subtitle, SFB_ATTR_FOOTER);
+    SfbPanelBlank ();
+  }
 }
 
 VOID
 SfbEndScreen (IN CONST CHAR16 *Footer)
 {
-  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
-  Print (L"\r\n%s\r\n", Footer);
+  UINTN  Index;
+
+  SfbPanelBlank ();
+  if (Footer != NULL) {
+    SfbPanelCentered (Footer, SFB_ATTR_FOOTER);
+  }
+  for (Index = 0; Index < gSfbPanelExtra; Index++) {
+    SfbPanelBlank ();
+  }
+  SfbPanelBorder ();
 }
 
 VOID
 SfbDrawRow (IN BOOLEAN Selected, IN CONST CHAR16 *Marker, IN CONST CHAR16 *Text)
 {
+  CHAR16  Inner[SFB_PANEL_MAX_WIDTH + 1];
+  UINTN   Width = gSfbPanelWidth;
+  UINTN   InnerWidth;
+  UINTN   MarkerLen;
+  UINTN   TextLen;
+  UINTN   MaxText;
+  UINTN   Index;
+
+  InnerWidth = (Width >= 2) ? Width - 2 : 0;
+  MarkerLen = (Marker != NULL) ? StrLen (Marker) : 0;
+  if (MarkerLen > 4) {
+    MarkerLen = 4;
+  }
+  if (InnerWidth < 3) {
+    MarkerLen = 0;
+    MaxText = 0;
+  } else {
+    if (MarkerLen > InnerWidth - 2) {
+      MarkerLen = InnerWidth - 2;
+    }
+    MaxText = InnerWidth - MarkerLen - 2;
+  }
+  TextLen = StrLen (Text);
+  if (TextLen > MaxText) {
+    TextLen = MaxText;
+  }
+
+  Index = 0;
+  Inner[Index++] = L' ';
+  CopyMem (&Inner[Index], Marker, MarkerLen * sizeof (CHAR16));
+  Index += MarkerLen;
+  Inner[Index++] = L' ';
+  CopyMem (&Inner[Index], Text, TextLen * sizeof (CHAR16));
+  Index += TextLen;
+  while (Index < InnerWidth) {
+    Inner[Index++] = L' ';
+  }
+  Inner[Index] = L'\0';
+
+  SfbPrintLeftPad ();
+  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_PANEL);
+  Print (L"|");
   gST->ConOut->SetAttribute (gST->ConOut,
                              Selected ? SFB_ATTR_SELECTED : SFB_ATTR_NORMAL);
-  Print (L"%s %s %s", Selected ? L">" : L" ", Marker, Text);
+  Print (L"%s", Inner);
+  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_PANEL);
+  Print (L"|\r\n");
   gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
-  Print (L"\r\n");
 }
 
 /*
@@ -170,13 +450,56 @@ SfbMoveCursor (IN OUT UINTN *Cursor, IN UINTN Count, IN SFB_KEY Key)
   }
 }
 
+/*
+ * Draw a small centred banner panel with an optional second line, used by the
+ * transient screens (entering menu, booting, fastboot mode, power actions and
+ * status reports).
+ */
+STATIC
+VOID
+SfbShowBanner (IN CONST CHAR16 *Text, IN CONST CHAR16 *Detail OPTIONAL)
+{
+  UINTN  Cols;
+  UINTN  Rows;
+  UINTN  Height;
+  UINTN  Top;
+  UINTN  Index;
+
+  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_TITLE);
+  gST->ConOut->ClearScreen (gST->ConOut);
+  gST->ConOut->EnableCursor (gST->ConOut, FALSE);
+
+  SfbScreenSize (&Cols, &Rows);
+  gSfbPanelWidth = SfbPanelWidth ();
+  gSfbPanelLeft  = (Cols - gSfbPanelWidth) / 2;
+
+  /* border, blank, text, [blank, detail,] border */
+  Height = (Detail != NULL) ? 5 : 3;
+  Top = (Height >= Rows) ? 0 : (Rows - Height) / 2;
+  for (Index = 0; Index < Top; Index++) {
+    Print (L"\r\n");
+  }
+
+  SfbPanelBorder ();
+  SfbPanelBlank ();
+  SfbPanelCentered (Text, SFB_ATTR_TITLE);
+  if (Detail != NULL) {
+    SfbPanelBlank ();
+    SfbPanelCentered (Detail, SFB_ATTR_NORMAL);
+  }
+  SfbPanelBorder ();
+
+  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
+}
+
 /* Report a failure and hold the screen until the user acknowledges it. */
 VOID
 SfbReportStatus (IN CONST CHAR16 *What, IN EFI_STATUS Status)
 {
-  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
-  Print (L"\r\n%s: %r\r\n", What, Status);
-  Print (L"Press power to continue.\r\n");
+  CHAR16  Text[SFB_DESC_CHARS + 32];
+
+  UnicodeSPrint (Text, sizeof (Text), L"%s: %r", What, Status);
+  SfbShowBanner (Text, L"Press power to continue.");
   SfbWaitForKey (0);
 }
 
@@ -189,13 +512,7 @@ SfbReportStatus (IN CONST CHAR16 *What, IN EFI_STATUS Status)
 VOID
 SfbShowFastbootMode (VOID)
 {
-  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_TITLE);
-  gST->ConOut->ClearScreen (gST->ConOut);
-  gST->ConOut->EnableCursor (gST->ConOut, FALSE);
-
-  Print (L"FASTBOOT MODE\r\n");
-
-  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
+  SfbShowBanner (L"FASTBOOT MODE", L"Connect a host and run fastboot commands.");
 }
 
 /*
@@ -206,20 +523,34 @@ SfbShowFastbootMode (VOID)
 VOID
 SfbShowBootingScreen (IN CONST CHAR16 *Name, IN BOOLEAN ClearScreen)
 {
-  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_TITLE);
+  CHAR16  Text[SFB_DESC_CHARS + 16];
+
+  UnicodeSPrint (Text, sizeof (Text), L"Booting %s",
+                 (Name != NULL && Name[0] != L'\0') ? Name : L"...");
+
   /*
    * An unattended default boot must not blank whatever is already on screen
    * (typically the boot splash): only clear when the launch came from the menu,
-   * where the menu itself is what needs clearing away.
+   * where the menu itself is what needs clearing away.  When the screen stays,
+   * the banner is centred in place instead of being wrapped in a panel.
    */
   if (ClearScreen) {
-    gST->ConOut->ClearScreen (gST->ConOut);
+    SfbShowBanner (Text, NULL);
+  } else {
+    UINTN  Cols;
+    UINTN  Rows;
+    UINTN  Col;
+    UINTN  Row;
+
+    gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_TITLE);
+    gST->ConOut->EnableCursor (gST->ConOut, FALSE);
+    SfbScreenSize (&Cols, &Rows);
+    Col = (StrLen (Text) >= Cols) ? 0 : (Cols - StrLen (Text)) / 2;
+    Row = Rows / 2;
+    gST->ConOut->SetCursorPosition (gST->ConOut, Col, Row);
+    Print (L"%s", Text);
+    gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
   }
-  gST->ConOut->EnableCursor (gST->ConOut, FALSE);
-
-  Print (L"Booting %s\r\n", (Name != NULL && Name[0] != L'\0') ? Name : L"...");
-
-  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
 }
 
 /*
@@ -230,13 +561,7 @@ SfbShowBootingScreen (IN CONST CHAR16 *Name, IN BOOLEAN ClearScreen)
 VOID
 SfbShowActionScreen (IN CONST CHAR16 *Text)
 {
-  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_TITLE);
-  gST->ConOut->ClearScreen (gST->ConOut);
-  gST->ConOut->EnableCursor (gST->ConOut, FALSE);
-
-  Print (L"%s\r\n", Text);
-
-  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
+  SfbShowBanner (Text, NULL);
 }
 
 /*
@@ -249,13 +574,7 @@ SfbShowActionScreen (IN CONST CHAR16 *Text)
 VOID
 SfbShowEnteringMenu (VOID)
 {
-  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_TITLE);
-  gST->ConOut->ClearScreen (gST->ConOut);
-  gST->ConOut->EnableCursor (gST->ConOut, FALSE);
-
-  Print (L"Entering Boot Menu\r\n");
-
-  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
+  SfbShowBanner (L"Entering Boot Menu", L"Volume Up/Down: move   Power: select");
 
   /* Wait for the key to be released... */
   gBS->Stall (SFB_ENTER_MENU_DELAY_S * 1000 * 1000);
@@ -280,7 +599,7 @@ SfbDrawMenu (IN CONST SFB_MENU_STATE *Menu,
   SfbBeginScreen (Title, NULL);
 
   if (Menu->Count == 0) {
-    Print (L"  No boot entries found.\r\n");
+    SfbPanelNote (L"No boot entries found.");
   }
 
   Start = SfbWindowStart (Cursor, Menu->Count, SFB_VISIBLE_ROWS);
@@ -306,7 +625,11 @@ SfbDrawMenu (IN CONST SFB_MENU_STATE *Menu,
   }
 
   if (Last < Menu->Count) {
-    Print (L"    ... %u more\r\n", (UINT32)(Menu->Count - Last));
+    CHAR16  Note[32];
+
+    UnicodeSPrint (Note, sizeof (Note), L"... %u more",
+                   (UINT32)(Menu->Count - Last));
+    SfbPanelNote (Note);
   }
 
   SfbEndScreen (L"Vol Up/Down: move   Power: select");
