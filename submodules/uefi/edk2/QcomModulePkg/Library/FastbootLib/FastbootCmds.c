@@ -148,9 +148,7 @@ STATIC CHAR8 StrSocVersion[MAX_RSP_SIZE];
 STATIC CHAR8 LogicalBlkSizeStr[MAX_RSP_SIZE];
 STATIC CHAR8 EraseBlkSizeStr[MAX_RSP_SIZE];
 STATIC CHAR8 MaxDownloadSizeStr[MAX_RSP_SIZE];
-#ifdef ENABLE_UPDATE_PARTITIONS_CMDS
 STATIC CHAR8 MaxFetchSizeStr[MAX_RSP_SIZE];
-#endif
 
 
 #define MAX_DISPLAY_PANEL_OVERRIDE 256
@@ -2736,14 +2734,14 @@ FastbootCommandSetup (IN VOID *Base, IN UINT64 Size)
   FastbootPublishVar ("max-download-size", MaxDownloadSizeStr);
 
 #ifdef ENABLE_UPDATE_PARTITIONS_CMDS
-  /* Modern fastboot hosts query max-fetch-size before the first fetch: and
-   * refuse to use the command when it is absent.  The fetch implementation
-   * streams in USB_BUFFER_SIZE chunks, so advertising that buffer size is the
-   * honest limit for a single fetch request. */
-  AsciiSPrint (MaxFetchSizeStr, sizeof (MaxFetchSizeStr), "0x%lx",
-               (UINT64)USB_BUFFER_SIZE);
+  /* The host checks this variable before it ever sends fetch:<partition>.
+   * CmdFetch already streams larger partitions as a sequence of requests, so
+   * advertise one transfer-buffer-sized chunk. */
+  AsciiSPrint (MaxFetchSizeStr, sizeof (MaxFetchSizeStr), "0x%x",
+               USB_BUFFER_SIZE);
   FastbootPublishVar ("max-fetch-size", MaxFetchSizeStr);
 #endif
+
 
   AsciiSPrint (FullProduct, sizeof (FullProduct), "%a", PRODUCT_NAME);
   FastbootPublishVar ("product", FullProduct);
