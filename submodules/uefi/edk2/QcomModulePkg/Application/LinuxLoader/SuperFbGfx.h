@@ -14,6 +14,7 @@
 #define __SUPER_FB_GFX_H__
 
 #include <Uefi.h>
+#include "SuperFbFont.h"
 
 /* 0x00RRGGBB palette for the lilac theme. */
 #define SFB_COLOR_BG        0x00141018   /* screen background          */
