@@ -136,13 +136,15 @@ SfbScreenSize (OUT UINTN *Columns, OUT UINTN *Rows)
   UINTN  Cols = 0;
   UINTN  Rs   = 0;
 
-  if (gST->ConOut->Mode != NULL) {
-    Cols = gST->ConOut->Mode->Columns;
-    Rs   = gST->ConOut->Mode->Rows;
-    if ((Cols == 0 || Rs == 0) && gST->ConOut->QueryMode != NULL) {
-      gST->ConOut->QueryMode (gST->ConOut, gST->ConOut->Mode->Mode,
-                              &Cols, &Rs);
-    }
+  /*
+   * EFI_SIMPLE_TEXT_OUTPUT_MODE carries no column/row count; the console
+   * dimensions come from QueryMode for the currently selected mode.
+   */
+  if (gST->ConOut->Mode != NULL &&
+      gST->ConOut->QueryMode != NULL &&
+      gST->ConOut->Mode->Mode >= 0) {
+    gST->ConOut->QueryMode (gST->ConOut, (UINTN)gST->ConOut->Mode->Mode,
+                            &Cols, &Rs);
   }
 
   *Columns = (Cols == 0) ? 80 : Cols;
