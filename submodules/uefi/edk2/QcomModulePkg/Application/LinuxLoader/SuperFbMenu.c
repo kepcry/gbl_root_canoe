@@ -772,59 +772,148 @@ SfbReportStatus (IN CONST CHAR16 *What, IN EFI_STATUS Status)
   SfbWaitForKey (0);
 }
 
-/* ---- "Pretentious Mode" log dump --------------------------------------- */
+/* ---- "Pretentious Mode" log stream and art ------------------------------ */
 
 /*
  * Pretentious Mode replaces the transient loading screens (booting prompt,
- * entering boot menu, entering fastboot) with a wall of hundreds of related
- * but meaningless log lines, printed as plain SimpleFont text on the text
- * console with no decoration.  The lines vary between subsystem messages,
- * statuses and TUI-style progress bars so the dump does not repeat itself.
- * Statuses are coloured ([ OK ] green, [WARN] yellow, [SKIP] cyan) and the
- * screen is never cleared, so the background stays untouched.  The text is
- * kept short and there is no per-line delay, so the console fills with as
- * many lines as it can hold.  In the boot path the stream is interleaved
- * with the real loading steps: printing never delays the launch and the
- * image is started as soon as loading completes.
+ * entering boot menu, entering fastboot) with a wall of related but
+ * meaningless log lines.  The lines use professional-sounding boot terms
+ * ("Kernel Patching", "Verifying boot image", ...) so the dump reads like a
+ * real loader log.  On a graphical display each line is drawn straight onto
+ * the frame buffer, blending only the glyphs over the existing background:
+ * the text takes exactly as many pixels as its characters need, with no
+ * black padding, and statuses are coloured ([ OK ] green, [WARN] yellow,
+ * [SKIP] cyan).  On the text console the same lines are printed in
+ * SimpleFont (the console fills the rest of each row, which cannot be
+ * avoided there).
+ *
+ * The booting prompt additionally shows the character chosen in the "Art
+ * Character" setting as block art; a black stamp behind the art is allowed.
+ * The boot path interleaves the stream with the real loading steps, so
+ * printing never delays the launch.
  */
 #define SFB_PRETENTIOUS_LINES    160
 #define SFB_PRETENTIOUS_DELAY_MS 2
+#define SFB_ART_CELL_PX          10
 
 #define SFB_ATTR_LOG_NORMAL  EFI_TEXT_ATTR (EFI_LIGHTGRAY, EFI_BLACK)
 
 typedef struct {
   CONST CHAR16  *Text;
-  UINTN         Attr;
+  UINTN         Attr;    /* SimpleFont console attribute */
+  UINT32        Color;   /* frame-buffer glyph colour */
 } SFB_PRETENTIOUS_STATUS;
 
 STATIC CONST CHAR16  *mSfbPretentiousModule[10] = {
-  L"boot", L"slim", L"hyp", L"abl", L"fastboot",
-  L"mem",  L"disp", L"stor", L"pwr", L"bndr",
+  L"abl", L"sbl", L"xbl", L"hyp", L"tz",
+  L"aop", L"uefi", L"boot", L"kernel", L"devcfg",
 };
 
 STATIC CONST CHAR16  *mSfbPretentiousAction[16] = {
-  L"probe display", L"tune resonance", L"inflate ego",  L"read scripture",
-  L"polish aura",   L"recalibrate",    L"harmonise",    L"map addrs",
-  L"tune rails",    L"ask boot gods",  L"pack dread",   L"fill cache",
-  L"light pipe",    L"rehearse",       L"defrag",       L"charge soul",
+  L"Kernel Patching",
+  L"Verifying boot image",
+  L"Decompressing kernel",
+  L"Loading device tree",
+  L"Mapping page tables",
+  L"Enabling MMU",
+  L"Initializing DMA",
+  L"Probing storage",
+  L"Enumerating partitions",
+  L"Configuring clocks",
+  L"Calibrating regulators",
+  L"Flushing caches",
+  L"Starting watchdog",
+  L"Setting up console",
+  L"Handing off to kernel",
+  L"Validating signatures",
 };
 
 STATIC CONST SFB_PRETENTIOUS_STATUS  mSfbPretentiousStatus[5] = {
-  { L"[ OK ]",  EFI_TEXT_ATTR (EFI_GREEN, EFI_BLACK) },
-  { L"[ OK ]",  EFI_TEXT_ATTR (EFI_GREEN, EFI_BLACK) },
-  { L"[ OK ]",  EFI_TEXT_ATTR (EFI_GREEN, EFI_BLACK) },
-  { L"[WARN]",  EFI_TEXT_ATTR (EFI_YELLOW, EFI_BLACK) },
-  { L"[SKIP]",  EFI_TEXT_ATTR (EFI_LIGHTCYAN, EFI_BLACK) },
+  { L"[ OK ]",  EFI_TEXT_ATTR (EFI_GREEN, EFI_BLACK),   SFB_COLOR_OK },
+  { L"[ OK ]",  EFI_TEXT_ATTR (EFI_GREEN, EFI_BLACK),   SFB_COLOR_OK },
+  { L"[ OK ]",  EFI_TEXT_ATTR (EFI_GREEN, EFI_BLACK),   SFB_COLOR_OK },
+  { L"[WARN]",  EFI_TEXT_ATTR (EFI_YELLOW, EFI_BLACK),  SFB_COLOR_WARN },
+  { L"[SKIP]",  EFI_TEXT_ATTR (EFI_LIGHTCYAN, EFI_BLACK), SFB_COLOR_SKIP },
 };
 
 STATIC BOOLEAN  gSfbPretentiousActive = FALSE;
 STATIC UINTN    gSfbPretentiousIndex = 0;
+STATIC UINT32   gSfbPretentiousY = 0;
 
 VOID
 SfbPretentiousBegin (VOID)
 {
   gSfbPretentiousActive = TRUE;
   gSfbPretentiousIndex = 0;
+  gSfbPretentiousY = 0;
+}
+
+/*
+ * Draw the chosen character as block art from the embedded glyph: on the
+ * frame buffer every "pixel" of the glyph becomes an SFB_ART_CELL_PX square
+ * on a black stamp, on the text console it is printed as rows of '#'.
+ * Returns the pixel height of the art block, or 0 on the text console.
+ */
+STATIC
+UINT32
+SfbPretentiousDrawArt (IN UINTN Choice)
+{
+  CHAR16  Ch = (Choice == 1) ? L'天' : ((Choice == 2) ? L'牛' : L'豪');
+  UINT32  Offset;
+  UINT8   GlyphWidth;
+  UINT8   GlyphAdvance;
+
+  if (!SfbFontGetGlyph (Ch, &Offset, &GlyphWidth, &GlyphAdvance)) {
+    return 0;
+  }
+
+  if (SfbGfxActive ()) {
+    UINT32  X = 12;
+    UINT32  Y = 12;
+    UINT32  Sx;
+    UINT32  Sy;
+
+    /* Black stamp behind the art is allowed in art mode. */
+    SfbGfxFillRect (X - 8, Y - 8,
+                    GlyphWidth * SFB_ART_CELL_PX + 16,
+                    SFB_FONT_CELL_H * SFB_ART_CELL_PX + 16,
+                    SFB_COLOR_BG);
+
+    for (Sy = 0; Sy < SFB_FONT_CELL_H; Sy++) {
+      for (Sx = 0; Sx < GlyphWidth; Sx++) {
+        UINTN   BitIndex = Sy * GlyphWidth + Sx;
+        UINT8   Alpha = (UINT8)(gSfbFontBitmap[Offset + BitIndex / 2] >>
+                                ((BitIndex & 1) ? 0 : 4)) & 0xF;
+
+        if (Alpha >= SFB_FONT_MAX_ALPHA / 2) {
+          SfbGfxFillRect (X + Sx * SFB_ART_CELL_PX, Y + Sy * SFB_ART_CELL_PX,
+                          SFB_ART_CELL_PX, SFB_ART_CELL_PX, SFB_COLOR_ACCENT);
+        }
+      }
+    }
+
+    return Y + SFB_FONT_CELL_H * SFB_ART_CELL_PX + 8;
+  } else {
+    UINTN  Sx;
+    UINTN  Sy;
+
+    gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_TITLE);
+    for (Sy = 0; Sy < SFB_FONT_CELL_H; Sy++) {
+      CHAR16  Line[SFB_FONT_MAX_W + 1];
+
+      for (Sx = 0; Sx < GlyphWidth; Sx++) {
+        UINTN   BitIndex = Sy * GlyphWidth + Sx;
+        UINT8   Alpha = (UINT8)(gSfbFontBitmap[Offset + BitIndex / 2] >>
+                                ((BitIndex & 1) ? 0 : 4)) & 0xF;
+
+        Line[Sx] = (Alpha >= SFB_FONT_MAX_ALPHA / 2) ? L'#' : L' ';
+      }
+      Line[GlyphWidth] = L'\0';
+      Print (L"%s\r\n", Line);
+    }
+    gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
+    return 0;
+  }
 }
 
 BOOLEAN
@@ -849,8 +938,7 @@ SfbPretentiousEmit (IN UINTN Count)
     UINT32  Msec = (UINT32)((gSfbPretentiousIndex % 100) * 10);
     UINT32  Pct  = (UINT32)((gSfbPretentiousIndex * 100) /
                             SFB_PRETENTIOUS_LINES);
-
-    gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_LOG_NORMAL);
+    CHAR16  Line[SFB_DESC_CHARS + 16];
 
     if ((gSfbPretentiousIndex % 7) == 6) {
       /* TUI-style progress bar line. */
@@ -865,15 +953,35 @@ SfbPretentiousEmit (IN UINTN Count)
       Bar[11] = L']';
       Bar[12] = L'\0';
 
-      Print (L"[%04u.%03u] %s: %s %3u%%\r\n",
-             Sec, Msec, mSfbPretentiousModule[Mod], Bar, Pct);
+      UnicodeSPrint (Line, sizeof (Line), L"[%04u.%03u] %s: %s %3u%%",
+                     Sec, Msec, mSfbPretentiousModule[Mod], Bar, Pct);
+
+      if (SfbGfxActive ()) {
+        SfbGfxDrawTextTransparent (Line, 0, gSfbPretentiousY, SFB_COLOR_TEXT);
+      } else {
+        gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_LOG_NORMAL);
+        Print (L"%s\r\n", Line);
+      }
     } else {
-      Print (L"[%04u.%03u] %s: %s ... ",
-             Sec, Msec, mSfbPretentiousModule[Mod],
-             mSfbPretentiousAction[Act]);
-      gST->ConOut->SetAttribute (gST->ConOut, mSfbPretentiousStatus[St].Attr);
-      Print (L"%s\r\n", mSfbPretentiousStatus[St].Text);
-      gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_LOG_NORMAL);
+      UnicodeSPrint (Line, sizeof (Line), L"[%04u.%03u] %s: %s ... ",
+                     Sec, Msec, mSfbPretentiousModule[Mod],
+                     mSfbPretentiousAction[Act]);
+
+      if (SfbGfxActive ()) {
+        SfbGfxDrawTextTransparent (Line, 0, gSfbPretentiousY, SFB_COLOR_TEXT);
+        SfbGfxDrawTextTransparent (mSfbPretentiousStatus[St].Text,
+                                   SfbGfxTextWidth (Line), gSfbPretentiousY,
+                                   mSfbPretentiousStatus[St].Color);
+      } else {
+        gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_LOG_NORMAL);
+        Print (L"%s", Line);
+        gST->ConOut->SetAttribute (gST->ConOut, mSfbPretentiousStatus[St].Attr);
+        Print (L"%s\r\n", mSfbPretentiousStatus[St].Text);
+      }
+    }
+
+    if (SfbGfxActive ()) {
+      gSfbPretentiousY += SFB_FONT_CELL_H + 4;
     }
   }
 
@@ -948,6 +1056,12 @@ SfbShowBootingScreen (IN CONST CHAR16 *Name, IN BOOLEAN ClearScreen)
 
   if (S.Pretentious) {
     SfbPretentiousBegin ();
+    if (SfbGfxActive ()) {
+      gSfbPretentiousY = SfbPretentiousDrawArt (S.PretentiousArt);
+      if (gSfbPretentiousY == 0) {
+        gSfbPretentiousY = SFB_FONT_CELL_H + 4;
+      }
+    }
     SfbPretentiousEmit (SFB_PRETENTIOUS_BATCH);
     return;
   }
@@ -1214,7 +1328,7 @@ SfbRunSettingsMenu (VOID)
     }
 
     SfbBeginScreen (SfbStr (StrSettings), NULL);
-    for (Index = 0; Index < 7; Index++) {
+    for (Index = 0; Index < 8; Index++) {
       CONST CHAR16  *Label = NULL;
       CONST CHAR16  *Value = NULL;
 
@@ -1244,6 +1358,12 @@ SfbRunSettingsMenu (VOID)
         Value = S.Pretentious ? SfbStr (StrOn) : SfbStr (StrOff);
         break;
       case 6:
+        Label = SfbStr (StrPretentiousArt);
+        Value = (S.PretentiousArt == 1) ? SfbStr (StrArtTian)
+               : (S.PretentiousArt == 2) ? SfbStr (StrArtNiu)
+                                         : SfbStr (StrArtHao);
+        break;
+      case 7:
       default:
         Label = SfbStr (StrBack);
         break;
@@ -1263,7 +1383,7 @@ SfbRunSettingsMenu (VOID)
 
     Key = SfbWaitForKey (0);
     if (Key == SfbKeyUp || Key == SfbKeyDown) {
-      SfbMoveCursor (&Cursor, 7, Key);
+      SfbMoveCursor (&Cursor, 8, Key);
       continue;
     }
 
@@ -1313,6 +1433,12 @@ SfbRunSettingsMenu (VOID)
       break;
 
     case 6:
+      S.PretentiousArt = (S.PretentiousArt + 1) % 3;
+      SaveStatus = SfbSettingsSave (&S);
+      Rebuild = TRUE;
+      break;
+
+    case 7:
     default:
       return;
     }

@@ -25,6 +25,9 @@
 #define SFB_COLOR_SEL_BG    0x00B98FD0   /* selection bar              */
 #define SFB_COLOR_SEL_FG    0x00141018   /* text on selection          */
 #define SFB_COLOR_ERR       0x00E08A8A   /* errors                     */
+#define SFB_COLOR_OK        0x0055CC66   /* green log status           */
+#define SFB_COLOR_WARN      0x00E0C04C   /* yellow log status          */
+#define SFB_COLOR_SKIP      0x0055BBCC   /* cyan log status            */
 
 /*
  * Locate the graphics output protocol.  Returns FALSE when no usable GOP is
@@ -84,6 +87,18 @@ SfbGfxDrawTextScaled (IN CONST CHAR16 *Text,
                       IN UINT32       Scale,
                       IN UINT32       Fg,
                       IN UINT32       Bg);
+
+/*
+ * Draw a string with the embedded bitmap font blending the glyphs over the
+ * existing frame buffer: only the characters are painted, the background is
+ * left untouched, and the text therefore takes exactly as much width as the
+ * characters need (no padding).
+ */
+VOID
+SfbGfxDrawTextTransparent (IN CONST CHAR16 *Text,
+                           IN UINT32       X,
+                           IN UINT32       Y,
+                           IN UINT32       Fg);
 
 /* Width in pixels of Text (fixed cells). */
 UINT32

@@ -85,6 +85,10 @@ typedef enum {
   StrVolumeFmt,
   StrDirTruncated,
   StrPretentious,
+  StrPretentiousArt,
+  StrArtHao,
+  StrArtTian,
+  StrArtNiu,
   StrCount
 } SFB_STR_ID;
 

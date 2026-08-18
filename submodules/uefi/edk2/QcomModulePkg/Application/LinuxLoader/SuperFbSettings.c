@@ -21,7 +21,8 @@ STATIC SFB_SETTINGS  mSfbSettings = {
   L"0000",        /* Pin */
   TRUE,           /* ShowBooting */
   FALSE,          /* BootToMenu: volume key opens the menu, no key boots */
-  FALSE           /* Pretentious: normal loading screens */
+  FALSE,          /* Pretentious: normal loading screens */
+  0               /* PretentiousArt: Hao */
 };
 
 /*
@@ -134,6 +135,13 @@ SfbSettingsLoad (VOID)
     mSfbSettings.Pretentious = (BOOLEAN)(SfbSettingsParseU32 (Value) != 0);
   }
 
+  if (SfbSettingsFindKey (Record + sizeof (SFB_CFG_TAG) - 1, "pretentious_art",
+                          Value, sizeof (Value)) != 0) {
+    UINT32  Art = SfbSettingsParseU32 (Value);
+
+    mSfbSettings.PretentiousArt = (Art <= 2) ? Art : 0;
+  }
+
   SfbLangSet (mSfbSettings.Lang);
   return EFI_SUCCESS;
 }
@@ -166,13 +174,14 @@ SfbSettingsSave (IN CONST SFB_SETTINGS *Settings)
   AsciiSPrint (
     Record, sizeof (Record),
     SFB_CFG_TAG
-    "lang=%a;pin_enable=%d;pin=%a;show_booting=%d;boot_to_menu=%d;pretentious=%d",
+    "lang=%a;pin_enable=%d;pin=%a;show_booting=%d;boot_to_menu=%d;pretentious=%d;pretentious_art=%d",
     (mSfbSettings.Lang == SfbLangEn) ? "en" : "zh",
     mSfbSettings.PinEnabled ? 1 : 0,
     PinA,
     mSfbSettings.ShowBooting ? 1 : 0,
     mSfbSettings.BootToMenu ? 1 : 0,
-    mSfbSettings.Pretentious ? 1 : 0);
+    mSfbSettings.Pretentious ? 1 : 0,
+    (UINT32)mSfbSettings.PretentiousArt);
 
   return SfbStoreWrite (SFB_STORE_SETTINGS, Record);
 }
