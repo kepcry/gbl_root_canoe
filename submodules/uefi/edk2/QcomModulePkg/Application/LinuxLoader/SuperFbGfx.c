@@ -292,6 +292,22 @@ SfbGfxDrawText (IN CONST CHAR16 *Text,
   FreePool (Row);
 }
 
+/* Alpha (0..SFB_FONT_MAX_ALPHA) of one source glyph pixel; 0 outside ink. */
+STATIC
+UINTN
+SfbGfxGlyphAlpha (IN UINT32 Offset, IN UINTN GlyphWidth,
+                  IN UINTN X, IN UINTN Y)
+{
+  UINTN  BitIndex;
+
+  if (X >= GlyphWidth || Y >= SFB_FONT_CELL_H) {
+    return 0;
+  }
+  BitIndex = Y * GlyphWidth + X;
+  return (UINTN)((gSfbFontBitmap[Offset + BitIndex / 2] >>
+                  ((BitIndex & 1) ? 0 : 4)) & 0xF);
+}
+
 VOID
 SfbGfxDrawTextScaled (IN CONST CHAR16 *Text,
                       IN UINT32       X,
@@ -382,13 +398,25 @@ SfbGfxDrawTextScaled (IN CONST CHAR16 *Text,
       continue;
     }
 
-    /* Nearest-neighbour scale: each source cell becomes Scale x Scale pixels
-     * with the same alpha, blended the same way as the unscaled path. */
+    /* Bilinear scale: interpolate the 4-bit alpha between the four
+     * neighbouring source pixels, so upscaled edges stay smooth instead of
+     * turning into nearest-neighbour blocks. */
     for (Gy = 0; Gy < ScaledCellH; Gy++) {
+      UINT32  Sy0 = Gy / Scale;
+      UINT32  Sy1 = (Sy0 + 1 < SFB_FONT_CELL_H) ? Sy0 + 1 : Sy0;
+      UINT32  Fy  = Gy % Scale;
+
       for (Gx = 0; Gx < (UINT32)GlyphWidth * Scale; Gx++) {
-        UINTN   BitIndex = (Gy / Scale) * GlyphWidth + (Gx / Scale);
-        UINT8   Alpha = (UINT8)(gSfbFontBitmap[Offset + BitIndex / 2] >>
-                                ((BitIndex & 1) ? 0 : 4)) & 0xF;
+        UINT32  Sx0 = Gx / Scale;
+        UINT32  Sx1 = (Sx0 + 1 < GlyphWidth) ? Sx0 + 1 : Sx0;
+        UINT32  Fx  = Gx % Scale;
+        UINTN   A00 = SfbGfxGlyphAlpha (Offset, GlyphWidth, Sx0, Sy0);
+        UINTN   A10 = SfbGfxGlyphAlpha (Offset, GlyphWidth, Sx1, Sy0);
+        UINTN   A01 = SfbGfxGlyphAlpha (Offset, GlyphWidth, Sx0, Sy1);
+        UINTN   A11 = SfbGfxGlyphAlpha (Offset, GlyphWidth, Sx1, Sy1);
+        UINTN   Top  = (A00 * (Scale - Fx) + A10 * Fx) / Scale;
+        UINTN   Bot  = (A01 * (Scale - Fx) + A11 * Fx) / Scale;
+        UINTN   Alpha = (Top * (Scale - Fy) + Bot * Fy) / Scale;
         UINTN   Dest = PenX + Gx + Gy * RowWidth;
 
         if (Alpha == SFB_FONT_MAX_ALPHA) {

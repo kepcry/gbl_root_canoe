@@ -888,12 +888,13 @@ SfbPretentiousShowArt (IN UINTN Choice)
   if (SfbGfxActive ()) {
     SfbGfxGetScreen (&W, &H);
 
-    /* Pick the largest scale that fits the screen with margins. */
-    Scale = 8;
+    /* Pick the largest scale that fits the screen with margins; the glyphs
+     * are bilinearly smoothed, so large scales stay crisp and even. */
+    Scale = 18;
     while (Scale > 2) {
       ArtW = SfbGfxTextWidth (Art) * Scale;
       ArtH = SFB_FONT_CELL_H * Scale;
-      if (ArtW <= W - 40 && ArtH <= H - 60) {
+      if (ArtW <= W - 20 && ArtH <= H - 40) {
         break;
       }
       Scale--;
