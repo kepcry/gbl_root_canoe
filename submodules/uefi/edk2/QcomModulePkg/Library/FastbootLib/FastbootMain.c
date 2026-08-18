@@ -417,6 +417,10 @@ STATIC CONST CHAR16 *mFbActionRow[FB_ACTION_ROWS] = {
 };
 STATIC UINTN mFbActionCursor = 0;
 
+/* Optional frame-buffer renderer installed by the hosting application; when
+ * NULL the built-in text-console screen is used. */
+STATIC FASTBOOT_SCREEN_DRAW mFastbootDrawHook = NULL;
+
 /* Rolling on-screen operation log (USB connect / fastboot commands). */
 STATIC CHAR16 mFbLog[FASTBOOT_LOG_LINES][FASTBOOT_LOG_CHARS];
 STATIC UINTN  mFbLogCount = 0;
@@ -462,6 +466,17 @@ FastbootDrawModeScreen (VOID)
   UINTN  LogCount;
   UINTN  First;
   UINTN  LogRow;
+  CONST CHAR16  *LogLines[FASTBOOT_LOG_LINES];
+
+  if (mFastbootDrawHook != NULL) {
+    for (Index = 0; Index < mFbLogCount; Index++) {
+      LogLines[Index] =
+        mFbLog[(mFbLogNext + FASTBOOT_LOG_LINES - mFbLogCount + Index)
+               % FASTBOOT_LOG_LINES];
+    }
+    mFastbootDrawHook (mFbActionCursor, mFbLogCount, LogLines);
+    return;
+  }
 
   gST->ConOut->SetAttribute (gST->ConOut, FB_ATTR_TITLE);
   gST->ConOut->ClearScreen (gST->ConOut);
@@ -519,6 +534,13 @@ FastbootShowActionScreen (IN CONST CHAR16 *Text)
   Print (L"%s\r\n", Text);
 
   gST->ConOut->SetAttribute (gST->ConOut, FB_ATTR_NORMAL);
+}
+
+EFI_STATUS
+FastbootSetScreenHooks (IN FASTBOOT_SCREEN_DRAW Draw)
+{
+  mFastbootDrawHook = Draw;
+  return EFI_SUCCESS;
 }
 
 VOID

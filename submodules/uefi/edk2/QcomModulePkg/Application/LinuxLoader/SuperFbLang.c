@@ -79,6 +79,7 @@ STATIC CONST SFB_LANG_STRING  mSfbStrings[StrCount] = {
   { L"Volume %u",                       L"卷 %u" },
   { L"(directory has more than %u entries; rest not shown)",
     L"（目录超过 %u 项，其余未显示）" },
+  { L"Pretentious Mode",                 L"家豪模式" },
 };
 
 STATIC SFB_LANG  mSfbLang = SfbLangZh;

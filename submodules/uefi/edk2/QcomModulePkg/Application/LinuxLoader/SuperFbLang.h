@@ -84,6 +84,7 @@ typedef enum {
   StrNoFatVolumes,
   StrVolumeFmt,
   StrDirTruncated,
+  StrPretentious,
   StrCount
 } SFB_STR_ID;
 

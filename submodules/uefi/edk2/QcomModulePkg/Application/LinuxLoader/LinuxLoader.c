@@ -271,6 +271,7 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
     /* Bring up the graphical UI when the platform offers a GOP; the text
      * console UI is used otherwise. */
     SfbGfxInit ();
+    SfbFastbootRegisterUi ();
 
     SfbSettingsGet (&Settings);
     if (Settings.BootToMenu) {
