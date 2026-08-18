@@ -62,29 +62,15 @@ EFI_STATUS FastbootInitialize (VOID);
 
 /* Rolling log kept by the fastboot loop and shown at the bottom of the
  * fastboot mode screen: USB connect/disconnect and the fastboot commands the
- * host sends. */
-#define FASTBOOT_LOG_LINES  6
+ * host sends.  The drawing code clips the ring to the bottom third of the
+ * console, so the ring only needs to cover that much. */
+#define FASTBOOT_LOG_LINES  16
 #define FASTBOOT_LOG_CHARS  64
 
-/*
- * Optional graphical fastboot screen installed by the hosting application via
- * FastbootSetScreenHooks.  Cursor is the highlighted action row; LogCount and
- * LogLines carry the newest on-screen log lines (LogLines[0] is the oldest).
- */
-typedef VOID (*FASTBOOT_SCREEN_DRAW) (IN UINTN Cursor,
-                                      IN UINTN LogCount,
-                                      IN CONST CHAR16 **LogLines);
-
-/*
- * Replace the on-device fastboot screen renderer.  Pass NULL to go back to the
- * built-in text-console screen.  The hook is only ever called from the
- * fastboot event loop, so drawing directly to the frame buffer is safe here.
- */
-EFI_STATUS
-FastbootSetScreenHooks (IN FASTBOOT_SCREEN_DRAW Draw OPTIONAL);
-
-/* Append one line to the on-screen fastboot log and repaint when a graphical
- * screen hook is installed. */
+/* Append one line to the on-screen fastboot log and repaint the fastboot
+ * screen: the newest line appears at the very bottom of the console, older
+ * lines climb upward until the bottom third of the screen is full, then the
+ * oldest lines are dropped. */
 VOID
 FastbootScreenLog (IN CONST CHAR16 *Text);
 

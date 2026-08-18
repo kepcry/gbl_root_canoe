@@ -339,14 +339,6 @@ VOID
 SfbShowFastbootMode (VOID);
 
 /*
- * Install the graphical fastboot mode screen (large embedded font, with the
- * USB connect / fastboot command log at the bottom) into the fastboot library
- * when a GOP is available.  Call after SfbGfxInit ().
- */
-VOID
-SfbFastbootRegisterUi (VOID);
-
-/*
  * Clear the console, show "Entering Boot Menu", and hold for a few seconds so
  * a volume key still held from power-on is released before the menu starts
  * taking input. The input buffer is drained afterwards so that held key does

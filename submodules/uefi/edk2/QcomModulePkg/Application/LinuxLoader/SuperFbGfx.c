@@ -291,3 +291,130 @@ SfbGfxDrawText (IN CONST CHAR16 *Text,
                 RowWidth * sizeof (EFI_GRAPHICS_OUTPUT_BLT_PIXEL));
   FreePool (Row);
 }
+
+VOID
+SfbGfxDrawTextScaled (IN CONST CHAR16 *Text,
+                      IN UINT32       X,
+                      IN UINT32       Y,
+                      IN UINT32       Scale,
+                      IN UINT32       Fg,
+                      IN UINT32       Bg)
+{
+  EFI_GRAPHICS_OUTPUT_BLT_PIXEL  *Row;
+  EFI_GRAPHICS_OUTPUT_BLT_PIXEL  FgPix;
+  EFI_GRAPHICS_OUTPUT_BLT_PIXEL  BgPix;
+  UINTN                           Length;
+  UINTN                           RowWidth;
+  UINTN                           RowHeight;
+  UINTN                           MaxWidth;
+  UINTN                           Index;
+  UINT32                          PenX;
+  UINT32                          ScaledCellH;
+
+  if (!SfbGfxActive () || Scale == 0) {
+    return;
+  }
+
+  Length = StrLen (Text);
+  if (Length == 0) {
+    return;
+  }
+
+  ScaledCellH = SFB_FONT_CELL_H * Scale;
+  MaxWidth = (mSfbScreenW > X) ? mSfbScreenW - X : 0;
+  if (MaxWidth == 0) {
+    return;
+  }
+
+  /* Measure, then drop characters from the end until the text fits. */
+  while (TRUE) {
+    RowWidth = 0;
+    for (Index = 0; Index < Length; Index++) {
+      UINT32  Offset;
+      UINT8   GlyphWidth;
+      UINT8   Advance;
+
+      if (SfbFontGetGlyph (Text[Index], &Offset, &GlyphWidth, &Advance)) {
+        RowWidth += (UINTN)Advance * Scale;
+      } else {
+        RowWidth += (UINTN)(SFB_FONT_CELL_H / 2) * Scale;
+      }
+    }
+    if (RowWidth <= MaxWidth || Length <= 1) {
+      break;
+    }
+    Length--;
+  }
+
+  RowHeight = ScaledCellH;
+  Row = AllocateZeroPool (RowWidth * RowHeight * sizeof (*Row));
+  if (Row == NULL) {
+    return;
+  }
+
+  SfbGfxPixel (&FgPix, Fg);
+  SfbGfxPixel (&BgPix, Bg);
+  for (Index = 0; Index < RowWidth * RowHeight; Index++) {
+    Row[Index] = BgPix;
+  }
+
+  PenX = 0;
+  for (Index = 0; Index < Length; Index++) {
+    UINT32  Offset;
+    UINT8   GlyphWidth;
+    UINT8   GlyphAdvance;
+    UINT32  Gx;
+    UINT32  Gy;
+
+    if (!SfbFontGetGlyph (Text[Index], &Offset, &GlyphWidth, &GlyphAdvance)) {
+      /* Hollow placeholder box, scaled like a missing glyph would be. */
+      UINT32  BoxW = (SFB_FONT_CELL_H / 2) * Scale;
+
+      for (Gx = 0; Gx < BoxW; Gx++) {
+        Row[PenX + Gx] = FgPix;
+        Row[PenX + Gx + (RowHeight - 1) * RowWidth] = FgPix;
+      }
+      for (Gy = 0; Gy < RowHeight; Gy++) {
+        Row[PenX + Gy * RowWidth] = FgPix;
+        Row[PenX + BoxW - 1 + Gy * RowWidth] = FgPix;
+      }
+      PenX += BoxW;
+      continue;
+    }
+
+    /* Nearest-neighbour scale: each source cell becomes Scale x Scale pixels
+     * with the same alpha, blended the same way as the unscaled path. */
+    for (Gy = 0; Gy < ScaledCellH; Gy++) {
+      for (Gx = 0; Gx < (UINT32)GlyphWidth * Scale; Gx++) {
+        UINTN   BitIndex = (Gy / Scale) * GlyphWidth + (Gx / Scale);
+        UINT8   Alpha = (UINT8)(gSfbFontBitmap[Offset + BitIndex / 2] >>
+                                ((BitIndex & 1) ? 0 : 4)) & 0xF;
+        UINTN   Dest = PenX + Gx + Gy * RowWidth;
+
+        if (Alpha == SFB_FONT_MAX_ALPHA) {
+          Row[Dest] = FgPix;
+        } else if (Alpha != 0) {
+          Row[Dest].Blue  = (UINT8)(((UINTN)FgPix.Blue  * Alpha +
+                                     (UINTN)BgPix.Blue  *
+                                       (SFB_FONT_MAX_ALPHA - Alpha)) /
+                                    SFB_FONT_MAX_ALPHA);
+          Row[Dest].Green = (UINT8)(((UINTN)FgPix.Green * Alpha +
+                                     (UINTN)BgPix.Green *
+                                       (SFB_FONT_MAX_ALPHA - Alpha)) /
+                                    SFB_FONT_MAX_ALPHA);
+          Row[Dest].Red   = (UINT8)(((UINTN)FgPix.Red   * Alpha +
+                                     (UINTN)BgPix.Red   *
+                                       (SFB_FONT_MAX_ALPHA - Alpha)) /
+                                    SFB_FONT_MAX_ALPHA);
+        }
+      }
+    }
+
+    PenX += (UINT32)GlyphAdvance * Scale;
+  }
+
+  mSfbGop->Blt (mSfbGop, Row, EfiBltBufferToVideo, 0, 0, X, Y,
+                (UINT32)RowWidth, (UINT32)RowHeight,
+                RowWidth * sizeof (EFI_GRAPHICS_OUTPUT_BLT_PIXEL));
+  FreePool (Row);
+}

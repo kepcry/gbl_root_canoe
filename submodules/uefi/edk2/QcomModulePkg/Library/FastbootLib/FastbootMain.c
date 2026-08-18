@@ -417,10 +417,6 @@ STATIC CONST CHAR16 *mFbActionRow[FB_ACTION_ROWS] = {
 };
 STATIC UINTN mFbActionCursor = 0;
 
-/* Optional graphical screen hook installed by the hosting application; when
- * NULL the built-in text-console screen is used. */
-STATIC FASTBOOT_SCREEN_DRAW mFastbootDrawHook = NULL;
-
 /* Rolling on-screen operation log (USB connect / fastboot commands). */
 STATIC CHAR16 mFbLog[FASTBOOT_LOG_LINES][FASTBOOT_LOG_CHARS];
 STATIC UINTN  mFbLogCount = 0;
@@ -438,21 +434,34 @@ typedef enum {
 
 STATIC
 VOID
+FastbootScreenSize (OUT UINTN *Columns, OUT UINTN *Rows)
+{
+  UINTN  Cols = 0;
+  UINTN  Rs   = 0;
+
+  if (gST->ConOut->Mode != NULL &&
+      gST->ConOut->QueryMode != NULL &&
+      gST->ConOut->Mode->Mode >= 0) {
+    gST->ConOut->QueryMode (gST->ConOut, (UINTN)gST->ConOut->Mode->Mode,
+                            &Cols, &Rs);
+  }
+
+  *Columns = (Cols == 0) ? 80 : Cols;
+  *Rows    = (Rs   == 0) ? 30 : Rs;
+}
+
+STATIC
+VOID
 FastbootDrawModeScreen (VOID)
 {
-  UINTN              Index;
-  UINTN              LogIndex;
-  CONST CHAR16       *LogLines[FASTBOOT_LOG_LINES];
-
-  if (mFastbootDrawHook != NULL) {
-    for (Index = 0; Index < mFbLogCount; Index++) {
-      LogLines[Index] =
-        mFbLog[(mFbLogNext + FASTBOOT_LOG_LINES - mFbLogCount + Index)
-               % FASTBOOT_LOG_LINES];
-    }
-    mFastbootDrawHook (mFbActionCursor, mFbLogCount, LogLines);
-    return;
-  }
+  UINTN  Index;
+  UINTN  LogIndex;
+  UINTN  Cols;
+  UINTN  Rows;
+  UINTN  LogCap;
+  UINTN  LogCount;
+  UINTN  First;
+  UINTN  LogRow;
 
   gST->ConOut->SetAttribute (gST->ConOut, FB_ATTR_TITLE);
   gST->ConOut->ClearScreen (gST->ConOut);
@@ -472,10 +481,28 @@ FastbootDrawModeScreen (VOID)
   gST->ConOut->SetAttribute (gST->ConOut, FB_ATTR_NORMAL);
   Print (L"\r\nVol Up/Down: move   Power: select\r\n");
 
-  for (LogIndex = 0; LogIndex < mFbLogCount; LogIndex++) {
-    Print (L"%s\r\n",
-           mFbLog[(mFbLogNext + FASTBOOT_LOG_LINES - mFbLogCount + LogIndex)
-                  % FASTBOOT_LOG_LINES]);
+  /*
+   * Operation log: newest line at the very bottom of the console, older lines
+   * above it.  Once the log would cover more than the bottom third of the
+   * screen, the oldest lines are dropped.  Everything stays left-aligned.
+   */
+  FastbootScreenSize (&Cols, &Rows);
+  LogCap = Rows / 3;
+  if (LogCap > FASTBOOT_LOG_LINES) {
+    LogCap = FASTBOOT_LOG_LINES;
+  }
+  LogCount = mFbLogCount;
+  if (LogCount > LogCap) {
+    LogCount = LogCap;
+  }
+  First = mFbLogCount - LogCount;
+  for (LogIndex = 0; LogIndex < LogCount; LogIndex++) {
+    LogRow = Rows - LogCount + LogIndex;
+    gST->ConOut->SetCursorPosition (gST->ConOut, 0, LogRow);
+    gST->ConOut->SetAttribute (gST->ConOut, FB_ATTR_NORMAL);
+    Print (L"%s",
+           mFbLog[(mFbLogNext + FASTBOOT_LOG_LINES - mFbLogCount + First
+                   + LogIndex) % FASTBOOT_LOG_LINES]);
   }
 }
 
@@ -492,13 +519,6 @@ FastbootShowActionScreen (IN CONST CHAR16 *Text)
   gST->ConOut->SetAttribute (gST->ConOut, FB_ATTR_NORMAL);
 }
 
-EFI_STATUS
-FastbootSetScreenHooks (IN FASTBOOT_SCREEN_DRAW Draw)
-{
-  mFastbootDrawHook = Draw;
-  return EFI_SUCCESS;
-}
-
 VOID
 FastbootScreenLog (IN CONST CHAR16 *Text)
 {
@@ -513,14 +533,9 @@ FastbootScreenLog (IN CONST CHAR16 *Text)
     mFbLogCount++;
   }
 
-  if (mFastbootDrawHook != NULL) {
-    /* The graphical screen repaints so the new line appears in place. */
-    FastbootDrawModeScreen ();
-  } else {
-    /* Text console: print the line below the fastboot screen; the screen
-     * redraw replays the whole ring so the log survives key presses. */
-    Print (L"%s\r\n", Text);
-  }
+  /* Repaint so the new line lands at the very bottom and the older lines
+   * climb upward. */
+  FastbootDrawModeScreen ();
 }
 
 /*

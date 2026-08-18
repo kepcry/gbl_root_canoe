@@ -71,6 +71,20 @@ SfbGfxDrawText (IN CONST CHAR16 *Text,
                 IN UINT32       Fg,
                 IN UINT32       Bg);
 
+/*
+ * Draw a string with the embedded bitmap font scaled up by an integer factor
+ * (nearest-neighbour, so glyphs keep their shape).  Characters missing from
+ * the font table are drawn as a hollow placeholder box, like SfbGfxDrawText.
+ * The text is clipped at the right edge of the screen.
+ */
+VOID
+SfbGfxDrawTextScaled (IN CONST CHAR16 *Text,
+                      IN UINT32       X,
+                      IN UINT32       Y,
+                      IN UINT32       Scale,
+                      IN UINT32       Fg,
+                      IN UINT32       Bg);
+
 /* Width in pixels of Text (fixed cells). */
 UINT32
 SfbGfxTextWidth (IN CONST CHAR16 *Text);

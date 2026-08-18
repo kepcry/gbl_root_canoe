@@ -20,8 +20,6 @@
 #include <Library/UefiLib.h>
 #include <Protocol/SimpleTextIn.h>
 
-#include <FastbootLib/FastbootMain.h>
-
 #include "SuperFbGfx.h"
 #include "SuperFbLang.h"
 #include "SuperFbSettings.h"
@@ -778,117 +776,20 @@ SfbReportStatus (IN CONST CHAR16 *What, IN EFI_STATUS Status)
  * Hand the screen over to fastboot. The menu is the last thing that draws
  * before control leaves for the fastboot loop, which prints nothing of its own
  * until a host connects, so without this the user would be staring at a boot
- * menu that no longer responds to anything.
+ * menu that no longer responds to anything.  Plain SimpleFont text, left
+ * aligned, matching the fastboot mode screen the library draws next.
  */
 VOID
 SfbShowFastbootMode (VOID)
 {
-  SfbShowBanner (SfbStr (StrFastbootMode), SfbStr (StrFastbootHint));
-}
+  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_TITLE);
+  gST->ConOut->ClearScreen (gST->ConOut);
+  gST->ConOut->EnableCursor (gST->ConOut, FALSE);
 
-/*
- * Graphical fastboot mode screen, installed in the fastboot library when a GOP
- * is available.  It keeps the fastboot layout - "FASTBOOT MODE" title, the
- * Power Off / Restart action rows with the cursor highlighted, and the key
- * hint - but renders it with the large embedded font, and shows the USB
- * connect / fastboot command log at the very bottom of the window.
- */
-#define SFB_FB_MAX_LOG_VISIBLE  4
+  Print (L"FASTBOOT MODE\r\n\r\n");
+  Print (L"Connect a host and run fastboot commands.\r\n");
 
-STATIC
-VOID
-SfbFastbootDrawScreen (IN UINTN Cursor,
-                       IN UINTN LogCount,
-                       IN CONST CHAR16 **LogLines)
-{
-  UINT32  W;
-  UINT32  H;
-  UINT32  PanelH;
-  UINT32  PanelTop;
-  UINT32  TitleY;
-  UINT32  RowY;
-  UINT32  RowH;
-  UINT32  HintY;
-  UINT32  LogBottom;
-  UINT32  LogAreaTop;
-  UINT32  LogY;
-  UINT32  VisibleLogs;
-  UINTN   Index;
-
-  SfbGfxGetScreen (&W, &H);
-
-  /* Size the window to its content: title, two action rows, key hint and up
-   * to four log lines, then centre it on the display. */
-  PanelH = 20 + SFB_FONT_CELL_H + 24
-           + 2 * (SFB_FONT_CELL_H + 20)
-           + 20 + SFB_FONT_CELL_H
-           + 12 + SFB_FB_MAX_LOG_VISIBLE * SFB_FONT_CELL_H + 16;
-  if (PanelH < 4 * SFB_FONT_CELL_H) {
-    PanelH = 4 * SFB_FONT_CELL_H;
-  }
-  if (PanelH > H) {
-    PanelH = H;
-  }
-  PanelTop = (H - PanelH) / 2;
-
-  SfbGfxClear (SFB_COLOR_BG);
-  SfbGfxFillRect (0, PanelTop, W, PanelH, SFB_COLOR_PANEL);
-  SfbGfxHLine (PanelTop, 0, W - 1, 2, SFB_COLOR_ACCENT);
-  SfbGfxHLine (PanelTop + PanelH - 2, 0, W - 1, 2, SFB_COLOR_ACCENT);
-
-  TitleY = PanelTop + 20;
-  SfbGfxDrawCentered (L"FASTBOOT MODE", W, TitleY, SFB_COLOR_ACCENT,
-                      SFB_COLOR_PANEL);
-
-  /* Same two action rows the text-console screen offers. */
-  RowH = SFB_FONT_CELL_H + 20;
-  RowY = TitleY + SFB_FONT_CELL_H + 24;
-  for (Index = 0; Index < 2; Index++) {
-    UINT32  Y = RowY + (UINT32)Index * RowH;
-
-    if (Index == Cursor) {
-      SfbGfxFillRect (48, Y, W - 96, SFB_FONT_CELL_H + 10, SFB_COLOR_SEL_BG);
-      SfbGfxDrawCentered ((Index == 0) ? L"Power Off" : L"Restart", W,
-                          Y + 5, SFB_COLOR_SEL_FG, SFB_COLOR_SEL_BG);
-    } else {
-      SfbGfxDrawCentered ((Index == 0) ? L"Power Off" : L"Restart", W,
-                          Y + 5, SFB_COLOR_TEXT, SFB_COLOR_PANEL);
-    }
-  }
-
-  HintY = RowY + 2 * RowH + 20;
-  SfbGfxDrawCentered (L"Vol Up/Down: move   Power: select", W, HintY,
-                      SFB_COLOR_ACCENT_D, SFB_COLOR_PANEL);
-
-  /* Operation log pinned to the bottom of the window; clip to what fits. */
-  LogBottom = PanelTop + PanelH - 16;
-  LogAreaTop = HintY + SFB_FONT_CELL_H + 12;
-  if (LogAreaTop >= LogBottom) {
-    VisibleLogs = 0;
-  } else {
-    VisibleLogs = (UINT32)LogCount;
-    if (VisibleLogs > SFB_FB_MAX_LOG_VISIBLE) {
-      VisibleLogs = SFB_FB_MAX_LOG_VISIBLE;
-    }
-    if (VisibleLogs > (LogBottom - LogAreaTop) / SFB_FONT_CELL_H) {
-      VisibleLogs = (LogBottom - LogAreaTop) / SFB_FONT_CELL_H;
-    }
-  }
-
-  LogY = LogBottom - VisibleLogs * SFB_FONT_CELL_H;
-  for (Index = 0; Index < VisibleLogs; Index++) {
-    SfbGfxDrawCentered (LogLines[LogCount - VisibleLogs + Index], W, LogY,
-                        SFB_COLOR_ACCENT_D, SFB_COLOR_PANEL);
-    LogY += SFB_FONT_CELL_H;
-  }
-}
-
-VOID
-SfbFastbootRegisterUi (VOID)
-{
-  if (SfbGfxActive ()) {
-    FastbootSetScreenHooks (SfbFastbootDrawScreen);
-  }
+  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
 }
 
 /*
@@ -896,10 +797,10 @@ SfbFastbootRegisterUi (VOID)
  * of its own until it takes over, so without this the boot menu would linger on
  * screen through the load.
  *
- * The prompt itself stays plain English ("Booting <name>") in the large
- * embedded font on a graphical display, or the firmware's SimpleFont on the
- * text console; no panel is wrapped around it, and SfbBootLog appends
- * progress lines underneath.
+ * The prompt itself stays plain English ("Booting <name>") in the firmware's
+ * SimpleFont, left-aligned around the vertical middle of the console.  No
+ * panel or decoration is drawn around it; SfbBootLog appends plain
+ * left-aligned progress lines underneath.
  */
 /* Lines of boot progress drawn under the prompt; reset per launch. */
 STATIC UINTN  gSfbBootLogCount = 0;
@@ -932,22 +833,9 @@ SfbShowBootingScreen (IN CONST CHAR16 *Name, IN BOOLEAN ClearScreen)
   UnicodeSPrint (Text, sizeof (Text), L"Booting %s",
                  (Name != NULL && Name[0] != L'\0') ? Name : L"...");
 
-  if (SfbGfxActive ()) {
-    UINT32  W;
-    UINT32  H;
-    UINT32  Y;
-
-    SfbGfxGetScreen (&W, &H);
-    if (ClearScreen) {
-      SfbGfxClear (SFB_COLOR_BG);
-    }
-    /* Prompt above the middle so the progress log fits underneath. */
-    Y = (H >= 5 * SFB_FONT_CELL_H) ? H / 2 - 2 * SFB_FONT_CELL_H : 0;
-    SfbGfxDrawCentered (Text, W, Y, SFB_COLOR_ACCENT, SFB_COLOR_BG);
-  } else {
+  {
     UINTN  Cols;
     UINTN  Rows;
-    UINTN  Col;
     UINTN  Row;
 
     gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_TITLE);
@@ -955,20 +843,21 @@ SfbShowBootingScreen (IN CONST CHAR16 *Name, IN BOOLEAN ClearScreen)
     if (ClearScreen) {
       gST->ConOut->ClearScreen (gST->ConOut);
     }
+    /* SimpleFont, left-aligned around the vertical middle of the console;
+     * the progress log is printed underneath, also left-aligned. */
     SfbScreenSize (&Cols, &Rows);
-    Col = (StrLen (Text) >= Cols) ? 0 : (Cols - StrLen (Text)) / 2;
     Row = (Rows >= 5) ? Rows / 2 - 2 : 0;
-    gST->ConOut->SetCursorPosition (gST->ConOut, Col, Row);
+    gST->ConOut->SetCursorPosition (gST->ConOut, 0, Row);
     Print (L"%s", Text);
     gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
   }
 }
 
 /*
- * Append one line of boot progress under the "Booting" prompt.  Drawn with the
- * same renderer as the prompt (large embedded font on GOP, SimpleFont on the
- * text console); up to four lines are kept.  Honors the "Show Booting screen"
- * setting, so turning the prompt off also silences the log.
+ * Append one line of boot progress under the "Booting" prompt, plain
+ * SimpleFont text, left-aligned.  Up to four lines are kept.  Honors the
+ * "Show Booting screen" setting, so turning the prompt off also silences the
+ * log.
  */
 #define SFB_BOOT_LOG_MAX  4
 
@@ -990,25 +879,14 @@ SfbBootLog (IN CONST CHAR16 *Text)
     return;
   }
 
-  if (SfbGfxActive ()) {
-    UINT32  W;
-    UINT32  H;
-    UINT32  Y;
-
-    SfbGfxGetScreen (&W, &H);
-    Y = H / 2 + SFB_FONT_CELL_H / 2 + 8 +
-        (UINT32)gSfbBootLogCount * SFB_FONT_CELL_H;
-    SfbGfxDrawCentered (Text, W, Y, SFB_COLOR_TEXT, SFB_COLOR_BG);
-  } else {
+  {
     UINTN  Cols;
     UINTN  Rows;
-    UINTN  Col;
     UINTN  Row;
 
     SfbScreenSize (&Cols, &Rows);
-    Col = (StrLen (Text) >= Cols) ? 0 : (Cols - StrLen (Text)) / 2;
     Row = (Rows >= 5) ? Rows / 2 + 1 + gSfbBootLogCount : 0;
-    gST->ConOut->SetCursorPosition (gST->ConOut, Col, Row);
+    gST->ConOut->SetCursorPosition (gST->ConOut, 0, Row);
     gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_FOOTER);
     Print (L"%s", Text);
     gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
@@ -1035,36 +913,43 @@ SfbGfxShowPinScreen (IN CONST CHAR16 *Title, IN CONST UINT8 *Digit,
   CHAR16  Ch[2];
 
   SfbGfxGetScreen (&W, &H);
-  CellW = 56;
-  Gap = 24;
+  /* Enlarge the PIN UI to 2x the embedded font's 32px cell, so the digits are
+   * rendered at the largest size the font data supports. */
+  CellW = 2 * SFB_FONT_MAX_W;
+  Gap = SFB_FONT_MAX_W;
   TotalW = SFB_PIN_DIGITS * CellW + (SFB_PIN_DIGITS - 1) * Gap;
   X0 = (W >= TotalW) ? (W - TotalW) / 2 : 0;
-  Y0 = H / 2 - SFB_FONT_CELL_H / 2 - 8;
+  Y0 = H / 2 - 2 * SFB_FONT_CELL_H - 16;
 
   SfbGfxClear (SFB_COLOR_BG);
-  SfbGfxDrawCentered (Title, W, Y0 - 56, SFB_COLOR_ACCENT, SFB_COLOR_BG);
+  SfbGfxDrawCentered (Title, W, Y0 - 96, SFB_COLOR_ACCENT, SFB_COLOR_BG);
 
   for (Index = 0; Index < SFB_PIN_DIGITS; Index++) {
     UINT32  CX = X0 + (UINT32)Index * (CellW + Gap);
+    UINT32  DigitW;
 
     Ch[0] = (CHAR16)(L'0' + Digit[Index]);
     Ch[1] = L'\0';
+    DigitW = SfbGfxTextWidth (Ch) * 2;
 
     if (Index < Pos) {
-      SfbGfxFillRect (CX, Y0, CellW, SFB_FONT_CELL_H + 12, SFB_COLOR_ACCENT_D);
-      SfbGfxDrawText (Ch, CX + (CellW - SfbGfxTextWidth (Ch)) / 2, Y0 + 6,
-                      SFB_COLOR_BG, SFB_COLOR_ACCENT_D);
+      SfbGfxFillRect (CX, Y0, CellW, 2 * SFB_FONT_CELL_H + 12,
+                      SFB_COLOR_ACCENT_D);
+      SfbGfxDrawTextScaled (Ch, CX + (CellW - DigitW) / 2, Y0 + 6, 2,
+                            SFB_COLOR_BG, SFB_COLOR_ACCENT_D);
     } else if (Index == Pos) {
-      SfbGfxFillRect (CX, Y0, CellW, SFB_FONT_CELL_H + 12, SFB_COLOR_ACCENT);
-      SfbGfxDrawText (Ch, CX + (CellW - SfbGfxTextWidth (Ch)) / 2, Y0 + 6,
-                      SFB_COLOR_BG, SFB_COLOR_ACCENT);
+      SfbGfxFillRect (CX, Y0, CellW, 2 * SFB_FONT_CELL_H + 12,
+                      SFB_COLOR_ACCENT);
+      SfbGfxDrawTextScaled (Ch, CX + (CellW - DigitW) / 2, Y0 + 6, 2,
+                            SFB_COLOR_BG, SFB_COLOR_ACCENT);
     } else {
-      SfbGfxFillRect (CX, Y0, CellW, SFB_FONT_CELL_H + 12, SFB_COLOR_PANEL);
+      SfbGfxFillRect (CX, Y0, CellW, 2 * SFB_FONT_CELL_H + 12,
+                      SFB_COLOR_PANEL);
       SfbGfxHLine (Y0, CX, CX + CellW - 1, 2, SFB_COLOR_ACCENT_D);
     }
   }
 
-  SfbGfxDrawCentered (SfbStr (StrKeyNavPin), W, Y0 + SFB_FONT_CELL_H + 40,
+  SfbGfxDrawCentered (SfbStr (StrKeyNavPin), W, Y0 + 2 * SFB_FONT_CELL_H + 44,
                       SFB_COLOR_ACCENT_D, SFB_COLOR_BG);
 }
 
