@@ -62,15 +62,16 @@ EFI_STATUS FastbootInitialize (VOID);
 
 /* Rolling log kept by the fastboot loop and shown at the bottom of the
  * fastboot mode screen: USB connect/disconnect and the fastboot commands the
- * host sends.  The drawing code clips the ring to the bottom third of the
- * console, so the ring only needs to cover that much. */
-#define FASTBOOT_LOG_LINES  16
+ * host sends.  The drawing code clips the ring to the console space below the
+ * fastboot header, so the ring only needs to cover that much. */
+#define FASTBOOT_LOG_LINES  128
 #define FASTBOOT_LOG_CHARS  64
 
 /* Append one line to the on-screen fastboot log and repaint the fastboot
  * screen: the newest line appears at the very bottom of the console, older
- * lines climb upward until the bottom third of the screen is full, then the
- * oldest lines are dropped. */
+ * lines climb upward until the space below the fastboot header down to the
+ * very bottom of the screen is full, then the oldest lines are dropped.
+ * Everything is printed from the leftmost column. */
 VOID
 FastbootScreenLog (IN CONST CHAR16 *Text);
 

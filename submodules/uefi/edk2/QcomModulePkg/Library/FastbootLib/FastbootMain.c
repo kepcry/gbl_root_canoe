@@ -483,11 +483,13 @@ FastbootDrawModeScreen (VOID)
 
   /*
    * Operation log: newest line at the very bottom of the console, older lines
-   * above it.  Once the log would cover more than the bottom third of the
-   * screen, the oldest lines are dropped.  Everything stays left-aligned.
+   * above it.  The log area spans everything below the fastboot header
+   * ("FASTBOOT MODE", the two action rows and the key hint) down to the very
+   * bottom of the console; once it is full the oldest lines are dropped.
+   * Everything is printed from the leftmost column.
    */
   FastbootScreenSize (&Cols, &Rows);
-  LogCap = Rows / 3;
+  LogCap = (Rows > 6) ? Rows - 6 : 0;
   if (LogCap > FASTBOOT_LOG_LINES) {
     LogCap = FASTBOOT_LOG_LINES;
   }

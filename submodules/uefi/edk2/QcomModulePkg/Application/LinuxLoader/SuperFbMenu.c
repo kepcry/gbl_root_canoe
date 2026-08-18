@@ -798,9 +798,9 @@ SfbShowFastbootMode (VOID)
  * screen through the load.
  *
  * The prompt itself stays plain English ("Booting <name>") in the firmware's
- * SimpleFont, left-aligned around the vertical middle of the console.  No
- * panel or decoration is drawn around it; SfbBootLog appends plain
- * left-aligned progress lines underneath.
+ * SimpleFont, starting at the top-left corner of the console.  No panel or
+ * decoration is drawn around it; SfbBootLog appends every task log line
+ * underneath, also from the left edge, one line per row.
  */
 /* Lines of boot progress drawn under the prompt; reset per launch. */
 STATIC UINTN  gSfbBootLogCount = 0;
@@ -836,18 +836,16 @@ SfbShowBootingScreen (IN CONST CHAR16 *Name, IN BOOLEAN ClearScreen)
   {
     UINTN  Cols;
     UINTN  Rows;
-    UINTN  Row;
 
     gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_TITLE);
     gST->ConOut->EnableCursor (gST->ConOut, FALSE);
     if (ClearScreen) {
       gST->ConOut->ClearScreen (gST->ConOut);
     }
-    /* SimpleFont, left-aligned around the vertical middle of the console;
-     * the progress log is printed underneath, also left-aligned. */
+    /* SimpleFont, top-left corner; the progress log is printed underneath,
+     * also from the leftmost column. */
     SfbScreenSize (&Cols, &Rows);
-    Row = (Rows >= 5) ? Rows / 2 - 2 : 0;
-    gST->ConOut->SetCursorPosition (gST->ConOut, 0, Row);
+    gST->ConOut->SetCursorPosition (gST->ConOut, 0, 0);
     Print (L"%s", Text);
     gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
   }
@@ -855,12 +853,11 @@ SfbShowBootingScreen (IN CONST CHAR16 *Name, IN BOOLEAN ClearScreen)
 
 /*
  * Append one line of boot progress under the "Booting" prompt, plain
- * SimpleFont text, left-aligned.  Up to four lines are kept.  Honors the
+ * SimpleFont text, left-aligned, one line per row from row 1 down.  Every
+ * task log line is printed until the console runs out of rows.  Honors the
  * "Show Booting screen" setting, so turning the prompt off also silences the
  * log.
  */
-#define SFB_BOOT_LOG_MAX  4
-
 VOID
 SfbBootLog (IN CONST CHAR16 *Text)
 {
@@ -875,17 +872,16 @@ SfbBootLog (IN CONST CHAR16 *Text)
     return;
   }
 
-  if (gSfbBootLogCount >= SFB_BOOT_LOG_MAX) {
-    return;
-  }
-
   {
     UINTN  Cols;
     UINTN  Rows;
     UINTN  Row;
 
     SfbScreenSize (&Cols, &Rows);
-    Row = (Rows >= 5) ? Rows / 2 + 1 + gSfbBootLogCount : 0;
+    if (Rows == 0 || gSfbBootLogCount + 1 >= Rows) {
+      return;
+    }
+    Row = 1 + gSfbBootLogCount;
     gST->ConOut->SetCursorPosition (gST->ConOut, 0, Row);
     gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_FOOTER);
     Print (L"%s", Text);

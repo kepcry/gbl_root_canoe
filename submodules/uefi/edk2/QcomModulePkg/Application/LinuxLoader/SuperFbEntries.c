@@ -1079,6 +1079,7 @@ SfbLaunchEntry (IN CONST SFB_BOOT_ENTRY *Entry,
    * default untouched.
    */
   if (!Temporary && !Entry->NoDefault) {
+    SfbBootLog (L"Saving default entry");
     SfbSaveDefaultEntry (Entry);
   }
 
@@ -1103,6 +1104,12 @@ SfbLaunchEntry (IN CONST SFB_BOOT_ENTRY *Entry,
   SfbBootLog (L"Starting image...");
   Status = gBS->StartImage (ImageHandle, &ExitDataSize, &ExitData);
   DEBUG ((EFI_D_INFO, "SFB: '%s' returned: %r\n", Entry->Path, Status));
+  {
+    CHAR16  Log[SFB_PATH_CHARS + 16];
+
+    UnicodeSPrint (Log, sizeof (Log), L"Image returned: %r", Status);
+    SfbBootLog (Log);
+  }
 
   /* An application that returns has already been unloaded by the core; only
    * the exit data is ours to release. */
