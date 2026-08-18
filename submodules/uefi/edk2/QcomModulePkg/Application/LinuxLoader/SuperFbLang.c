@@ -85,9 +85,11 @@ STATIC CONST SFB_LANG_STRING  mSfbStrings[StrCount] = {
   { L"Log (Optimized)",                  L"日志(优化)" },
   { L"Log (Classic)",                    L"日志(经典)" },
   { L"Art",                              L"字符画" },
-  { L"Hao",                              L"豪" },
-  { L"Tian",                             L"天" },
-  { L"Niu",                              L"牛" },
+  /* The art character choices stay Chinese regardless of the UI language. */
+  { L"豪情在天",                          L"豪情在天" },
+  { L"嘉豪",                              L"嘉豪" },
+  { L"嘉欣",                              L"嘉欣" },
+  { L"豪",                                L"豪" },
 };
 
 STATIC SFB_LANG  mSfbLang = SfbLangZh;

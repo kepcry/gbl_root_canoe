@@ -335,6 +335,9 @@ STATIC UINTN   gSfbGfxRowIndex    = 0;
 STATIC UINTN   gSfbGfxVisibleRows = SFB_VISIBLE_ROWS;
 /* Same deferred subtitle as the text path, drawn at the bottom of the panel. */
 STATIC CONST CHAR16  *gSfbGfxSubtitle = NULL;
+/* Panel background used by the current screen; the settings screen overrides
+ * it to black so the row text sits on black instead of dark purple. */
+STATIC UINT32  gSfbPanelBg = SFB_COLOR_PANEL;
 
 /* Copy Text into Out (OutChars includes the NUL), appending "..." when cut. */
 STATIC
@@ -404,7 +407,7 @@ SfbGfxPanelBegin (IN CONST CHAR16 *Title, IN CONST CHAR16 *Subtitle)
   gSfbGfxPanelTop = (H - gSfbGfxPanelH) / 2;
 
   SfbGfxClear (SFB_COLOR_BG);
-  SfbGfxFillRect (0, gSfbGfxPanelTop, W, gSfbGfxPanelH, SFB_COLOR_PANEL);
+  SfbGfxFillRect (0, gSfbGfxPanelTop, W, gSfbGfxPanelH, gSfbPanelBg);
   SfbGfxHLine (gSfbGfxPanelTop, 0, W - 1, 2, SFB_COLOR_ACCENT);
   SfbGfxHLine (gSfbGfxPanelTop + gSfbGfxPanelH - 2, 0, W - 1, 2,
                SFB_COLOR_ACCENT);
@@ -431,7 +434,7 @@ SfbGfxPanelBegin (IN CONST CHAR16 *Title, IN CONST CHAR16 *Subtitle)
   }
   gSfbGfxRowIndex = 0;
 
-  SfbGfxDrawCentered (Title, W, TitleY, SFB_COLOR_ACCENT, SFB_COLOR_PANEL);
+  SfbGfxDrawCentered (Title, W, TitleY, SFB_COLOR_ACCENT, gSfbPanelBg);
 }
 
 STATIC
@@ -469,12 +472,12 @@ SfbGfxPanelRow (IN BOOLEAN Selected, IN BOOLEAN Enabled,
 
   if (!Enabled) {
     /* Unavailable rows are drawn dimmed, without the selection bar. */
-    SfbGfxDrawText (Fit, 40, TextY, SFB_COLOR_DISABLED, SFB_COLOR_PANEL);
+    SfbGfxDrawText (Fit, 40, TextY, SFB_COLOR_DISABLED, gSfbPanelBg);
   } else if (Selected) {
     SfbGfxFillRect (0, RowY, W, gSfbGfxRowH - 8, SFB_COLOR_SEL_BG);
     SfbGfxDrawText (Fit, 40, TextY, SFB_COLOR_SEL_FG, SFB_COLOR_SEL_BG);
   } else {
-    SfbGfxDrawText (Fit, 40, TextY, SFB_COLOR_TEXT, SFB_COLOR_PANEL);
+    SfbGfxDrawText (Fit, 40, TextY, SFB_COLOR_TEXT, gSfbPanelBg);
   }
 }
 
@@ -493,7 +496,7 @@ SfbGfxPanelNote (IN CONST CHAR16 *Text)
   RowY = gSfbGfxRowsStart + (UINT32)gSfbGfxRowIndex * gSfbGfxRowH;
   gSfbGfxRowIndex++;
   TextY = RowY + (gSfbGfxRowH - SFB_FONT_CELL_H) / 2;
-  SfbGfxDrawText (Fit, 40, TextY, SFB_COLOR_ACCENT_D, SFB_COLOR_PANEL);
+  SfbGfxDrawText (Fit, 40, TextY, SFB_COLOR_ACCENT_D, gSfbPanelBg);
 }
 
 STATIC
@@ -507,11 +510,11 @@ SfbGfxPanelEnd (IN CONST CHAR16 *Footer)
   if (gSfbGfxSubtitle != NULL) {
     SfbGfxDrawCentered (gSfbGfxSubtitle, W,
                         gSfbGfxFooterY - SFB_FONT_CELL_H - 12,
-                        SFB_COLOR_ACCENT_D, SFB_COLOR_PANEL);
+                        SFB_COLOR_ACCENT_D, gSfbPanelBg);
   }
   if (Footer != NULL) {
     SfbGfxDrawCentered (Footer, W, gSfbGfxFooterY, SFB_COLOR_ACCENT_D,
-                        SFB_COLOR_PANEL);
+                        gSfbPanelBg);
   }
 }
 
@@ -843,6 +846,11 @@ STATIC CONST SFB_PRETENTIOUS_STATUS  mSfbPretentiousStatus[5] = {
   { L"[SKIP]",  EFI_TEXT_ATTR (EFI_LIGHTCYAN, EFI_BLACK), SFB_COLOR_SKIP },
 };
 
+/* Art choices, always shown in Chinese regardless of the UI language. */
+STATIC CONST CHAR16  *mSfbPretentiousArtText[4] = {
+  L"豪情在天", L"嘉豪", L"嘉欣", L"豪",
+};
+
 STATIC BOOLEAN  gSfbPretentiousActive = FALSE;
 STATIC UINTN    gSfbPretentiousIndex = 0;
 STATIC UINT32   gSfbPretentiousY = 0;
@@ -856,87 +864,120 @@ SfbPretentiousBegin (VOID)
   SfbSettingsGet (&S);
   gSfbPretentiousActive = TRUE;
   gSfbPretentiousIndex = 0;
-  gSfbPretentiousY = 0;
+  /* Top margin: keep the first line clear of the phone's rounded corner. */
+  gSfbPretentiousY = 30;
   gSfbPretentiousMode = S.PretentiousMode;
 }
 
 /*
- * Show the chosen character centered on the screen as block art made from
- * the embedded glyph: on the frame buffer every "pixel" of the glyph becomes
- * an SFB_ART_CELL_PX square on a black stamp, on the text console it is
- * printed as rows of '#'.  Art mode outputs no log lines.
+ * Show the chosen text centered on the screen as block art made from the
+ * embedded glyphs: on the frame buffer every "pixel" of a glyph becomes an
+ * SFB_ART_CELL_PX square on a black stamp, on the text console it is printed
+ * as rows of '#'.  Art mode outputs no log lines.
  */
 STATIC
 VOID
 SfbPretentiousShowArt (IN UINTN Choice)
 {
-  CHAR16  Ch = (Choice == 1) ? L'天' : ((Choice == 2) ? L'牛' : L'豪');
-  UINT32  Offset;
-  UINT8   GlyphWidth;
-  UINT8   GlyphAdvance;
-
-  if (!SfbFontGetGlyph (Ch, &Offset, &GlyphWidth, &GlyphAdvance)) {
-    return;
-  }
+  CONST CHAR16  *Art = mSfbPretentiousArtText[Choice %
+                                              ARRAY_SIZE (mSfbPretentiousArtText)];
+  UINTN         Chars = StrLen (Art);
+  UINTN         Ci;
 
   if (SfbGfxActive ()) {
     UINT32  W;
     UINT32  H;
-    UINT32  ArtW;
+    UINT32  ArtW = 0;
     UINT32  ArtH;
     UINT32  X;
     UINT32  Y;
     UINT32  Sx;
     UINT32  Sy;
+    UINT32  PenX;
 
     SfbGfxGetScreen (&W, &H);
-    ArtW = GlyphWidth * SFB_ART_CELL_PX;
     ArtH = SFB_FONT_CELL_H * SFB_ART_CELL_PX;
+
+    for (Ci = 0; Ci < Chars; Ci++) {
+      UINT32  Offset;
+      UINT8   GlyphWidth;
+      UINT8   GlyphAdvance;
+
+      if (SfbFontGetGlyph (Art[Ci], &Offset, &GlyphWidth, &GlyphAdvance)) {
+        ArtW += GlyphWidth * SFB_ART_CELL_PX;
+      } else {
+        ArtW += SFB_FONT_MAX_W * SFB_ART_CELL_PX;
+      }
+      if (Ci + 1 < Chars) {
+        ArtW += 2 * SFB_ART_CELL_PX;
+      }
+    }
+
     X = (W >= ArtW) ? (W - ArtW) / 2 : 0;
     Y = (H >= ArtH) ? (H - ArtH) / 2 : 0;
 
     /* Black stamp behind the art is allowed in art mode. */
     SfbGfxFillRect (X - 8, Y - 8, ArtW + 16, ArtH + 16, SFB_COLOR_BG);
 
-    for (Sy = 0; Sy < SFB_FONT_CELL_H; Sy++) {
-      for (Sx = 0; Sx < GlyphWidth; Sx++) {
-        UINTN   BitIndex = Sy * GlyphWidth + Sx;
-        UINT8   Alpha = (UINT8)(gSfbFontBitmap[Offset + BitIndex / 2] >>
-                                ((BitIndex & 1) ? 0 : 4)) & 0xF;
+    PenX = X;
+    for (Ci = 0; Ci < Chars; Ci++) {
+      UINT32  Offset;
+      UINT8   GlyphWidth;
+      UINT8   GlyphAdvance;
 
-        if (Alpha >= SFB_FONT_MAX_ALPHA / 2) {
-          SfbGfxFillRect (X + Sx * SFB_ART_CELL_PX, Y + Sy * SFB_ART_CELL_PX,
-                          SFB_ART_CELL_PX, SFB_ART_CELL_PX, SFB_COLOR_ACCENT);
+      if (!SfbFontGetGlyph (Art[Ci], &Offset, &GlyphWidth, &GlyphAdvance)) {
+        PenX += SFB_FONT_MAX_W * SFB_ART_CELL_PX + 2 * SFB_ART_CELL_PX;
+        continue;
+      }
+
+      for (Sy = 0; Sy < SFB_FONT_CELL_H; Sy++) {
+        for (Sx = 0; Sx < GlyphWidth; Sx++) {
+          UINTN   BitIndex = Sy * GlyphWidth + Sx;
+          UINT8   Alpha = (UINT8)(gSfbFontBitmap[Offset + BitIndex / 2] >>
+                                  ((BitIndex & 1) ? 0 : 4)) & 0xF;
+
+          if (Alpha >= SFB_FONT_MAX_ALPHA / 2) {
+            SfbGfxFillRect (PenX + Sx * SFB_ART_CELL_PX,
+                            Y + Sy * SFB_ART_CELL_PX,
+                            SFB_ART_CELL_PX, SFB_ART_CELL_PX,
+                            SFB_COLOR_ACCENT);
+          }
         }
       }
+
+      PenX += GlyphWidth * SFB_ART_CELL_PX + 2 * SFB_ART_CELL_PX;
     }
   } else {
     UINTN  Cols;
     UINTN  Rows;
-    UINTN  Pad;
-    UINTN  Sx;
-    UINTN  Sy;
 
     SfbScreenSize (&Cols, &Rows);
-    Pad = (Cols > GlyphWidth) ? (Cols - GlyphWidth) / 2 : 0;
 
     gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_TITLE);
-    for (Sy = 0; Sy < SFB_FONT_CELL_H; Sy++) {
-      CHAR16  Line[SFB_FONT_MAX_W + 1];
-      UINTN   Li = 0;
+    for (Ci = 0; Ci < Chars; Ci++) {
+      UINT32  Offset;
+      UINT8   GlyphWidth;
+      UINT8   GlyphAdvance;
+      UINTN   Sx;
+      UINTN   Sy;
 
-      while (Li < Pad) {
-        Line[Li++] = L' ';
+      if (!SfbFontGetGlyph (Art[Ci], &Offset, &GlyphWidth, &GlyphAdvance)) {
+        continue;
       }
-      for (Sx = 0; Sx < GlyphWidth; Sx++) {
-        UINTN   BitIndex = Sy * GlyphWidth + Sx;
-        UINT8   Alpha = (UINT8)(gSfbFontBitmap[Offset + BitIndex / 2] >>
-                                ((BitIndex & 1) ? 0 : 4)) & 0xF;
 
-        Line[Li++] = (Alpha >= SFB_FONT_MAX_ALPHA / 2) ? L'#' : L' ';
+      for (Sy = 0; Sy < SFB_FONT_CELL_H; Sy++) {
+        CHAR16  Line[SFB_FONT_MAX_W + 1];
+
+        for (Sx = 0; Sx < GlyphWidth; Sx++) {
+          UINTN   BitIndex = Sy * GlyphWidth + Sx;
+          UINT8   Alpha = (UINT8)(gSfbFontBitmap[Offset + BitIndex / 2] >>
+                                  ((BitIndex & 1) ? 0 : 4)) & 0xF;
+
+          Line[Sx] = (Alpha >= SFB_FONT_MAX_ALPHA / 2) ? L'#' : L' ';
+        }
+        Line[GlyphWidth] = L'\0';
+        Print (L"%s\r\n", Line);
       }
-      Line[Li] = L'\0';
-      Print (L"%s\r\n", Line);
     }
     gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
   }
@@ -967,10 +1008,19 @@ SfbPretentiousEmit (IN UINTN Count)
                    Pid, mSfbPretentiousModule[Mod], mSfbPretentiousAction[Act]);
 
     if (SfbGfxActive () && gSfbPretentiousMode == SFB_PRETENTIOUS_LOG_OPTIMIZED) {
-      SfbGfxDrawTextTransparent (Line, 0, gSfbPretentiousY, SFB_COLOR_TEXT);
-      SfbGfxDrawTextTransparent (mSfbPretentiousStatus[St].Text,
-                                 SfbGfxTextWidth (Line), gSfbPretentiousY,
-                                 mSfbPretentiousStatus[St].Color);
+      UINT32  W;
+      UINT32  H;
+      UINT32  Bottom;
+
+      SfbGfxGetScreen (&W, &H);
+      /* Bottom margin: stop drawing below the 30px safe area. */
+      Bottom = (H > 30) ? H - 30 : 0;
+      if (gSfbPretentiousY + SFB_FONT_CELL_H <= Bottom) {
+        SfbGfxDrawTextTransparent (Line, 0, gSfbPretentiousY, SFB_COLOR_TEXT);
+        SfbGfxDrawTextTransparent (mSfbPretentiousStatus[St].Text,
+                                   SfbGfxTextWidth (Line), gSfbPretentiousY,
+                                   mSfbPretentiousStatus[St].Color);
+      }
     } else {
       /* Classic style (or no GOP): plain SimpleFont console output. */
       gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_LOG_NORMAL);
@@ -1313,8 +1363,9 @@ SfbRunPinGate (VOID)
 #define SFB_SETTINGS_ROW_COUNT  9
 
 /* TRUE when the settings row may be selected; disabled rows are dimmed and
- * skipped by the cursor.  "Change PIN" needs the PIN on, and the Pretentious
- * Mode / Character rows need Pretentious Mode on. */
+ * skipped by the cursor.  "Change PIN" needs the PIN on, the Mode row needs
+ * Pretentious Mode on, and the Character row additionally needs the mode set
+ * to character art. */
 STATIC
 BOOLEAN
 SfbSettingsRowEnabled (IN CONST SFB_SETTINGS *S, IN UINTN Index)
@@ -1322,8 +1373,12 @@ SfbSettingsRowEnabled (IN CONST SFB_SETTINGS *S, IN UINTN Index)
   if (Index == 2) {
     return S->PinEnabled;
   }
-  if (Index == 6 || Index == 7) {
+  if (Index == 6) {
     return S->Pretentious;
+  }
+  if (Index == 7) {
+    return (BOOLEAN)(S->Pretentious &&
+                     S->PretentiousMode == SFB_PRETENTIOUS_ART);
   }
   return TRUE;
 }
@@ -1339,9 +1394,6 @@ SfbRunSettingsMenu (VOID)
 
   while (TRUE) {
     UINTN   Index;
-    UINTN   Start;
-    UINTN   Last;
-    UINTN   Visible;
     CHAR16  RowText[SFB_DESC_CHARS + 8];
 
     if (Rebuild) {
@@ -1349,15 +1401,12 @@ SfbRunSettingsMenu (VOID)
       Rebuild = FALSE;
     }
 
+    /* The settings list is short enough to show in full; rows sit on a black
+     * background instead of the dark-purple panel. */
+    gSfbPanelBg = SFB_COLOR_BG;
     SfbBeginScreen (SfbStr (StrSettings), NULL);
-    Visible = SfbVisibleRows ();
-    Start = SfbWindowStart (Cursor, SFB_SETTINGS_ROW_COUNT, Visible);
-    Last = Start + Visible;
-    if (Last > SFB_SETTINGS_ROW_COUNT) {
-      Last = SFB_SETTINGS_ROW_COUNT;
-    }
 
-    for (Index = Start; Index < Last; Index++) {
+    for (Index = 0; Index < SFB_SETTINGS_ROW_COUNT; Index++) {
       CONST CHAR16  *Label = NULL;
       CONST CHAR16  *Value = NULL;
 
@@ -1396,9 +1445,10 @@ SfbRunSettingsMenu (VOID)
         break;
       case 7:
         Label = SfbStr (StrPretentiousArt);
-        Value = (S.PretentiousArt == 1) ? SfbStr (StrArtTian)
-               : (S.PretentiousArt == 2) ? SfbStr (StrArtNiu)
-                                         : SfbStr (StrArtHao);
+        Value = (S.PretentiousArt == 1) ? SfbStr (StrArtJiaHao)
+               : (S.PretentiousArt == 2) ? SfbStr (StrArtJiaXin)
+               : (S.PretentiousArt == 3) ? SfbStr (StrArtHao)
+                                         : SfbStr (StrArtHaoQing);
         break;
       case 8:
       default:
@@ -1417,15 +1467,8 @@ SfbRunSettingsMenu (VOID)
       SfbDrawRow ((BOOLEAN)(Index == Cursor),
                   SfbSettingsRowEnabled (&S, Index), L" ", RowText);
     }
-
-    if (Last < SFB_SETTINGS_ROW_COUNT) {
-      CHAR16  Note[32];
-
-      UnicodeSPrint (Note, sizeof (Note), SfbStr (StrMore),
-                     (UINT32)(SFB_SETTINGS_ROW_COUNT - Last));
-      SfbPanelNote (Note);
-    }
     SfbEndScreen (SfbStr (StrKeyNavSelect));
+    gSfbPanelBg = SFB_COLOR_PANEL;
 
     Key = SfbWaitForKey (0);
     if (Key == SfbKeyUp || Key == SfbKeyDown) {
@@ -1496,8 +1539,8 @@ SfbRunSettingsMenu (VOID)
       break;
 
     case 7:
-      if (S.Pretentious) {
-        S.PretentiousArt = (S.PretentiousArt + 1) % 3;
+      if (S.Pretentious && S.PretentiousMode == SFB_PRETENTIOUS_ART) {
+        S.PretentiousArt = (S.PretentiousArt + 1) % 4;
         SaveStatus = SfbSettingsSave (&S);
       }
       Rebuild = TRUE;
@@ -1535,21 +1578,9 @@ SfbShowActionScreen (IN CONST CHAR16 *Text)
 VOID
 SfbShowEnteringMenu (VOID)
 {
-  SFB_SETTINGS  S;
-
-  SfbSettingsGet (&S);
-  if (S.Pretentious) {
-    if (S.PretentiousMode == SFB_PRETENTIOUS_ART) {
-      SfbPretentiousShowArt (S.PretentiousArt);
-    } else {
-      SfbPretentiousBegin ();
-      while (SfbPretentiousEmit (SFB_PRETENTIOUS_BATCH)) {
-        gBS->Stall (SFB_PRETENTIOUS_DELAY_MS * 1000);
-      }
-    }
-  } else {
-    SfbShowBanner (SfbStr (StrEnteringBootMenu), SfbStr (StrKeyNavSelect));
-  }
+  /* The "Entering Boot Menu" transition (after the PIN gate) is not affected
+   * by Pretentious Mode: it always shows the plain banner. */
+  SfbShowBanner (SfbStr (StrEnteringBootMenu), SfbStr (StrKeyNavSelect));
 
   /* Wait for the key to be released... */
   gBS->Stall (SFB_ENTER_MENU_DELAY_S * 1000 * 1000);

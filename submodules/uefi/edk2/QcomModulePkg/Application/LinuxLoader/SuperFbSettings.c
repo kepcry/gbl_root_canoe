@@ -22,7 +22,7 @@ STATIC SFB_SETTINGS  mSfbSettings = {
   TRUE,           /* ShowBooting */
   FALSE,          /* BootToMenu: volume key opens the menu, no key boots */
   FALSE,          /* Pretentious: normal loading screens */
-  0,              /* PretentiousArt: Hao */
+  0,              /* PretentiousArt: 豪情在天 */
   SFB_PRETENTIOUS_LOG_OPTIMIZED
 };
 
@@ -140,7 +140,7 @@ SfbSettingsLoad (VOID)
                           Value, sizeof (Value)) != 0) {
     UINT32  Art = SfbSettingsParseU32 (Value);
 
-    mSfbSettings.PretentiousArt = (Art <= 2) ? Art : 0;
+    mSfbSettings.PretentiousArt = (Art <= 3) ? Art : 0;
   }
 
   if (SfbSettingsFindKey (Record + sizeof (SFB_CFG_TAG) - 1, "pretentious_mode",

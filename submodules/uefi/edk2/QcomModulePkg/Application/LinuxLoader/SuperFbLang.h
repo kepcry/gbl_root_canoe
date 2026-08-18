@@ -90,9 +90,10 @@ typedef enum {
   StrLogOptimized,
   StrLogClassic,
   StrArtMode,
+  StrArtHaoQing,
+  StrArtJiaHao,
+  StrArtJiaXin,
   StrArtHao,
-  StrArtTian,
-  StrArtNiu,
   StrCount
 } SFB_STR_ID;
 

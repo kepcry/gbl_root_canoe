@@ -34,7 +34,8 @@ typedef struct {
   BOOLEAN   BootToMenu;
   /* "Pretentious Mode": loading screens dump hundreds of meaningless logs. */
   BOOLEAN   Pretentious;
-  /* Character-art glyph shown on the booting prompt: 0=Hao, 1=Tian, 2=Niu. */
+  /* Character-art text shown on the booting prompt: 0=豪情在天, 1=嘉豪,
+   * 2=嘉欣, 3=豪. */
   UINTN     PretentiousArt;
   /* Pretentious Mode style: SFB_PRETENTIOUS_LOG_OPTIMIZED / _LOG_CLASSIC /
    * _ART. */
