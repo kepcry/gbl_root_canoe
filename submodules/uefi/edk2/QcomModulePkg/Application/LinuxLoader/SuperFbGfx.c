@@ -292,6 +292,24 @@ SfbGfxDrawText (IN CONST CHAR16 *Text,
   FreePool (Row);
 }
 
+VOID
+SfbGfxBltImage (IN UINT32 X,
+                IN UINT32 Y,
+                IN UINT32 Width,
+                IN UINT32 Height,
+                IN VOID   *BltBuffer)
+{
+  if (!SfbGfxActive () || BltBuffer == NULL || Width == 0 || Height == 0) {
+    return;
+  }
+  if (X + Width > mSfbScreenW || Y + Height > mSfbScreenH) {
+    return;
+  }
+
+  mSfbGop->Blt (mSfbGop, BltBuffer, EfiBltBufferToVideo, 0, 0, X, Y,
+                Width, Height, Width * sizeof (EFI_GRAPHICS_OUTPUT_BLT_PIXEL));
+}
+
 /* Alpha (0..SFB_FONT_MAX_ALPHA) of one source glyph pixel; 0 outside ink. */
 STATIC
 UINTN

@@ -24,6 +24,7 @@
 #define SFB_PRETENTIOUS_LOG_OPTIMIZED  0   /* transparent frame-buffer logs */
 #define SFB_PRETENTIOUS_LOG_CLASSIC    1   /* SimpleFont console logs       */
 #define SFB_PRETENTIOUS_ART            2   /* centered character art, no log */
+#define SFB_PRETENTIOUS_CUSTOM         3   /* centered efisp/logo.bin image  */
 
 typedef struct {
   SFB_LANG  Lang;
@@ -38,7 +39,7 @@ typedef struct {
    * 2=嘉欣, 3=豪. */
   UINTN     PretentiousArt;
   /* Pretentious Mode style: SFB_PRETENTIOUS_LOG_OPTIMIZED / _LOG_CLASSIC /
-   * _ART. */
+   * _ART / _CUSTOM. */
   UINTN     PretentiousMode;
 } SFB_SETTINGS;
 

@@ -90,6 +90,7 @@ typedef enum {
   StrLogOptimized,
   StrLogClassic,
   StrArtMode,
+  StrCustomMode,
   StrArtHaoQing,
   StrArtJiaHao,
   StrArtJiaXin,

@@ -102,6 +102,18 @@ SfbGfxDrawTextTransparent (IN CONST CHAR16 *Text,
                            IN UINT32       Y,
                            IN UINT32       Fg);
 
+/*
+ * Blit a raw frame-buffer image (EFI_GRAPHICS_OUTPUT_BLT_PIXEL rows) to the
+ * screen at (X, Y).  Does nothing when the image would not fit or GOP is
+ * inactive.
+ */
+VOID
+SfbGfxBltImage (IN UINT32 X,
+                IN UINT32 Y,
+                IN UINT32 Width,
+                IN UINT32 Height,
+                IN VOID   *BltBuffer);
+
 /* Width in pixels of Text (fixed cells). */
 UINT32
 SfbGfxTextWidth (IN CONST CHAR16 *Text);

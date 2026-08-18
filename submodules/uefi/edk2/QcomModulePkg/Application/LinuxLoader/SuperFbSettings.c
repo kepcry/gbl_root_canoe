@@ -147,8 +147,8 @@ SfbSettingsLoad (VOID)
                           Value, sizeof (Value)) != 0) {
     UINT32  Mode = SfbSettingsParseU32 (Value);
 
-    mSfbSettings.PretentiousMode = (Mode <= SFB_PRETENTIOUS_ART) ? Mode
-                                                                 : 0;
+    mSfbSettings.PretentiousMode = (Mode <= SFB_PRETENTIOUS_CUSTOM) ? Mode
+                                                                    : 0;
   }
 
   SfbLangSet (mSfbSettings.Lang);

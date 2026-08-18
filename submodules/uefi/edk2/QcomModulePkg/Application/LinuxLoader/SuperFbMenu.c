@@ -18,6 +18,7 @@
 #include <Library/ShutdownServices.h>
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/UefiLib.h>
+#include <Protocol/GraphicsOutput.h>
 #include <Protocol/SimpleTextIn.h>
 
 #include "SuperFbGfx.h"
@@ -793,8 +794,11 @@ SfbReportStatus (IN CONST CHAR16 *What, IN EFI_STATUS Status)
  *     need with no black padding; the classic style prints the same lines on
  *     the SimpleFont console, the way the earlier branch did.
  *   - art mode: no logs at all; the character chosen in the "Character"
- *     setting is shown centered on the screen as block art (a black stamp
- *     behind it is allowed).
+ *     setting is shown centered on the screen, glyphs scaled up directly on
+ *     a pure-black background.
+ *   - custom mode: no logs; the image from \efisp\logo.bmp on the ext4
+ *     persist volume is shown centered on the physical screen.  Missing or
+ *     invalid images are silently ignored so the launch never fails.
  *
  * In log mode the boot path interleaves the stream with the real loading
  * steps, so printing never delays the launch.
@@ -921,6 +925,145 @@ SfbPretentiousShowArt (IN UINTN Choice)
   }
 }
 
+/*
+ * Custom Mode: read \efisp\logo.bmp (a BMP image) from the ext4 persist
+ * volume and show it centered on the physical screen.  Any failure - file
+ * missing or unreadable, not a BMP, unsupported format, image out of range,
+ * no GOP - is silently ignored so the launch always continues.
+ */
+#define SFB_LOGO_MAX_BYTES  (4 * 1024 * 1024)
+#define SFB_LOGO_MAX_DIM    4096
+
+STATIC
+VOID
+SfbPretentiousShowLogo (VOID)
+{
+  EFI_STATUS                       Status;
+  EFI_HANDLE                       *Volumes = NULL;
+  UINTN                            VolumeCount = 0;
+  UINTN                            VolumeIndex;
+  EFI_FILE_PROTOCOL                *Root = NULL;
+  UINT8                            *Buffer = NULL;
+  UINTN                            BytesRead = 0;
+  UINT32                           PixelOffset;
+  UINT32                           HeightRaw;
+  UINT32                           Width;
+  UINT32                           Height;
+  UINT16                           Bpp;
+  UINT32                           Compression;
+  UINT32                           RowSize;
+  UINT32                           RowIndex;
+  BOOLEAN                          TopDown;
+  UINT32                           ScreenW;
+  UINT32                           ScreenH;
+  UINT32                           X;
+  UINT32                           Y;
+  EFI_GRAPHICS_OUTPUT_BLT_PIXEL    *Pixels = NULL;
+
+  if (!SfbGfxActive ()) {
+    return;
+  }
+
+  Status = SfbLocateVolumes (&Volumes, &VolumeCount);
+  if (EFI_ERROR (Status) || Volumes == NULL) {
+    goto done;
+  }
+
+  for (VolumeIndex = 0; VolumeIndex < VolumeCount; VolumeIndex++) {
+    if (SfbIsExt4Volume (Volumes[VolumeIndex])) {
+      break;
+    }
+  }
+  if (VolumeIndex >= VolumeCount) {
+    goto done;
+  }
+
+  Status = SfbOpenVolumeRoot (Volumes[VolumeIndex], &Root);
+  if (EFI_ERROR (Status) || Root == NULL) {
+    goto done;
+  }
+
+  Buffer = AllocateZeroPool (SFB_LOGO_MAX_BYTES);
+  if (Buffer == NULL) {
+    goto done;
+  }
+
+  Status = SfbReadFileBytes (Root, L"\\efisp\\logo.bmp", Buffer,
+                             SFB_LOGO_MAX_BYTES, &BytesRead);
+  if (EFI_ERROR (Status) || BytesRead < 54) {
+    goto done;
+  }
+
+  /* BITMAPFILEHEADER ('BM') + BITMAPINFOHEADER, uncompressed 24/32bpp. */
+  if (Buffer[0] != 'B' || Buffer[1] != 'M' || Buffer[14] != 40) {
+    goto done;
+  }
+  PixelOffset = (UINT32)Buffer[10] | ((UINT32)Buffer[11] << 8) |
+                ((UINT32)Buffer[12] << 16) | ((UINT32)Buffer[13] << 24);
+  Width  = (UINT32)Buffer[18] | ((UINT32)Buffer[19] << 8) |
+           ((UINT32)Buffer[20] << 16) | ((UINT32)Buffer[21] << 24);
+  HeightRaw = (UINT32)Buffer[22] | ((UINT32)Buffer[23] << 8) |
+              ((UINT32)Buffer[24] << 16) | ((UINT32)Buffer[25] << 24);
+  TopDown = (HeightRaw & 0x80000000) != 0;
+  Height  = TopDown ? (0U - HeightRaw) : HeightRaw;
+  Bpp = (UINT16)(Buffer[28] | ((UINT16)Buffer[29] << 8));
+  Compression = (UINT32)Buffer[30] | ((UINT32)Buffer[31] << 8) |
+                ((UINT32)Buffer[32] << 16) | ((UINT32)Buffer[33] << 24);
+
+  if (Width == 0 || Height == 0 ||
+      Width > SFB_LOGO_MAX_DIM || Height > SFB_LOGO_MAX_DIM ||
+      (Bpp != 24 && Bpp != 32) || Compression != 0) {
+    goto done;
+  }
+  RowSize = ((Bpp * Width + 31) / 32) * 4;
+  if ((UINTN)PixelOffset + (UINTN)RowSize * Height > BytesRead) {
+    goto done;
+  }
+
+  Pixels = AllocateZeroPool (Width * Height * sizeof (*Pixels));
+  if (Pixels == NULL) {
+    goto done;
+  }
+
+  for (RowIndex = 0; RowIndex < Height; RowIndex++) {
+    UINT32                            SrcRow = TopDown ? RowIndex
+                                                       : Height - 1 - RowIndex;
+    UINT8                             *Src = Buffer + PixelOffset +
+                                              SrcRow * RowSize;
+    EFI_GRAPHICS_OUTPUT_BLT_PIXEL     *Dst = &Pixels[RowIndex * Width];
+    UINT32                            Col;
+
+    for (Col = 0; Col < Width; Col++) {
+      Dst[Col].Blue     = Src[Col * (Bpp / 8)];
+      Dst[Col].Green    = Src[Col * (Bpp / 8) + 1];
+      Dst[Col].Red      = Src[Col * (Bpp / 8) + 2];
+      Dst[Col].Reserved = 0;
+    }
+  }
+
+  SfbGfxGetScreen (&ScreenW, &ScreenH);
+  X = (ScreenW >= Width) ? (ScreenW - Width) / 2 : 0;
+  Y = (ScreenH >= Height) ? (ScreenH - Height) / 2 : 0;
+
+  /* Clean black backdrop, then the logo, absolutely centred. */
+  SfbGfxClear (SFB_COLOR_BG);
+  SfbGfxBltImage (X, Y, Width, Height, Pixels);
+
+done:
+  if (Pixels != NULL) {
+    FreePool (Pixels);
+  }
+  if (Buffer != NULL) {
+    FreePool (Buffer);
+  }
+  if (Root != NULL) {
+    Root->Close (Root);
+  }
+  if (Volumes != NULL) {
+    FreePool (Volumes);
+  }
+}
+
 BOOLEAN
 SfbPretentiousEmit (IN UINTN Count)
 {
@@ -992,6 +1135,8 @@ SfbShowFastbootMode (VOID)
   if (S.Pretentious) {
     if (S.PretentiousMode == SFB_PRETENTIOUS_ART) {
       SfbPretentiousShowArt (S.PretentiousArt);
+    } else if (S.PretentiousMode == SFB_PRETENTIOUS_CUSTOM) {
+      SfbPretentiousShowLogo ();
     } else {
       SfbPretentiousBegin ();
       while (SfbPretentiousEmit (SFB_PRETENTIOUS_BATCH)) {
@@ -1048,6 +1193,8 @@ SfbShowBootingScreen (IN CONST CHAR16 *Name, IN BOOLEAN ClearScreen)
   if (S.Pretentious) {
     if (S.PretentiousMode == SFB_PRETENTIOUS_ART) {
       SfbPretentiousShowArt (S.PretentiousArt);
+    } else if (S.PretentiousMode == SFB_PRETENTIOUS_CUSTOM) {
+      SfbPretentiousShowLogo ();
     } else {
       SfbPretentiousBegin ();
       SfbPretentiousEmit (SFB_PRETENTIOUS_BATCH);
@@ -1377,7 +1524,9 @@ SfbRunSettingsMenu (VOID)
                   ? SfbStr (StrLogClassic)
                   : (S.PretentiousMode == SFB_PRETENTIOUS_ART)
                       ? SfbStr (StrArtMode)
-                      : SfbStr (StrLogOptimized);
+                      : (S.PretentiousMode == SFB_PRETENTIOUS_CUSTOM)
+                          ? SfbStr (StrCustomMode)
+                          : SfbStr (StrLogOptimized);
         break;
       case 7:
         Label = SfbStr (StrPretentiousArt);
@@ -1467,7 +1616,7 @@ SfbRunSettingsMenu (VOID)
 
     case 6:
       if (S.Pretentious) {
-        S.PretentiousMode = (S.PretentiousMode + 1) % 3;
+        S.PretentiousMode = (S.PretentiousMode + 1) % 4;
         SaveStatus = SfbSettingsSave (&S);
       }
       Rebuild = TRUE;
