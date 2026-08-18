@@ -6,7 +6,7 @@
  * entry records.  The record is a single printable-ASCII line of key=value
  * pairs separated by ';', so it stays easy to read and edit on the device:
  *
- *   SFBCFG1;lang=zh;pin_enable=0;pin=0000;show_booting=1;boot_to_menu=1;pretentious=0;pretentious_art=0
+ *   SFBCFG1;lang=zh;pin_enable=0;pin=0000;show_booting=1;boot_to_menu=1;pretentious=0;pretentious_mode=0;pretentious_art=0
  *
  * Copyright (c) 2026, contributors to the canoe ABL tree.
  * SPDX-License-Identifier: BSD-3-Clause
@@ -20,6 +20,11 @@
 
 #define SFB_PIN_DIGITS  4
 
+/* Pretentious Mode display styles. */
+#define SFB_PRETENTIOUS_LOG_OPTIMIZED  0   /* transparent frame-buffer logs */
+#define SFB_PRETENTIOUS_LOG_CLASSIC    1   /* SimpleFont console logs       */
+#define SFB_PRETENTIOUS_ART            2   /* centered character art, no log */
+
 typedef struct {
   SFB_LANG  Lang;
   BOOLEAN   PinEnabled;
@@ -31,6 +36,9 @@ typedef struct {
   BOOLEAN   Pretentious;
   /* Character-art glyph shown on the booting prompt: 0=Hao, 1=Tian, 2=Niu. */
   UINTN     PretentiousArt;
+  /* Pretentious Mode style: SFB_PRETENTIOUS_LOG_OPTIMIZED / _LOG_CLASSIC /
+   * _ART. */
+  UINTN     PretentiousMode;
 } SFB_SETTINGS;
 
 /*

@@ -37,6 +37,7 @@ CONST CHAR8 *gSfbMenuModuleTag = "SuperFbMenu";
 #define SFB_ATTR_TITLE     EFI_TEXT_ATTR (EFI_LIGHTMAGENTA, EFI_BLACK)
 #define SFB_ATTR_PANEL     EFI_TEXT_ATTR (EFI_MAGENTA, EFI_BLACK)
 #define SFB_ATTR_FOOTER    EFI_TEXT_ATTR (EFI_MAGENTA, EFI_BLACK)
+#define SFB_ATTR_DISABLED  EFI_TEXT_ATTR (EFI_DARKGRAY, EFI_BLACK)
 
 SFB_KEY
 SfbWaitForKey (IN UINT32 TimeoutMs)
@@ -435,7 +436,8 @@ SfbGfxPanelBegin (IN CONST CHAR16 *Title, IN CONST CHAR16 *Subtitle)
 
 STATIC
 VOID
-SfbGfxPanelRow (IN BOOLEAN Selected, IN CONST CHAR16 *Marker,
+SfbGfxPanelRow (IN BOOLEAN Selected, IN BOOLEAN Enabled,
+                IN CONST CHAR16 *Marker,
                 IN CONST CHAR16 *Text)
 {
   CHAR16  Full[SFB_DESC_CHARS + 8];
@@ -465,7 +467,10 @@ SfbGfxPanelRow (IN BOOLEAN Selected, IN CONST CHAR16 *Marker,
   gSfbGfxRowIndex++;
   TextY = RowY + (gSfbGfxRowH - SFB_FONT_CELL_H) / 2;
 
-  if (Selected) {
+  if (!Enabled) {
+    /* Unavailable rows are drawn dimmed, without the selection bar. */
+    SfbGfxDrawText (Fit, 40, TextY, SFB_COLOR_DISABLED, SFB_COLOR_PANEL);
+  } else if (Selected) {
     SfbGfxFillRect (0, RowY, W, gSfbGfxRowH - 8, SFB_COLOR_SEL_BG);
     SfbGfxDrawText (Fit, 40, TextY, SFB_COLOR_SEL_FG, SFB_COLOR_SEL_BG);
   } else {
@@ -622,10 +627,11 @@ SfbEndScreen (IN CONST CHAR16 *Footer)
 }
 
 VOID
-SfbDrawRow (IN BOOLEAN Selected, IN CONST CHAR16 *Marker, IN CONST CHAR16 *Text)
+SfbDrawRow (IN BOOLEAN Selected, IN BOOLEAN Enabled,
+            IN CONST CHAR16 *Marker, IN CONST CHAR16 *Text)
 {
   if (SfbGfxActive ()) {
-    SfbGfxPanelRow (Selected, Marker, Text);
+    SfbGfxPanelRow (Selected, Enabled, Marker, Text);
     return;
   }
 
@@ -671,8 +677,10 @@ SfbDrawRow (IN BOOLEAN Selected, IN CONST CHAR16 *Marker, IN CONST CHAR16 *Text)
   SfbPrintLeftPad ();
   gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_PANEL);
   Print (L"|");
-  gST->ConOut->SetAttribute (gST->ConOut,
-                             Selected ? SFB_ATTR_SELECTED : SFB_ATTR_NORMAL);
+  gST->ConOut->SetAttribute (
+    gST->ConOut,
+    !Enabled ? SFB_ATTR_DISABLED
+             : (Selected ? SFB_ATTR_SELECTED : SFB_ATTR_NORMAL));
   Print (L"%s", Inner);
   gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_PANEL);
   Print (L"|\r\n");
@@ -775,22 +783,21 @@ SfbReportStatus (IN CONST CHAR16 *What, IN EFI_STATUS Status)
 /* ---- "Pretentious Mode" log stream and art ------------------------------ */
 
 /*
- * Pretentious Mode replaces the transient loading screens (booting prompt,
- * entering boot menu, entering fastboot) with a wall of related but
- * meaningless log lines.  The lines use professional-sounding boot terms
- * ("Kernel Patching", "Verifying boot image", ...) so the dump reads like a
- * real loader log.  On a graphical display each line is drawn straight onto
- * the frame buffer, blending only the glyphs over the existing background:
- * the text takes exactly as many pixels as its characters need, with no
- * black padding, and statuses are coloured ([ OK ] green, [WARN] yellow,
- * [SKIP] cyan).  On the text console the same lines are printed in
- * SimpleFont (the console fills the rest of each row, which cannot be
- * avoided there).
+ * Pretentious Mode has two separate display styles:
+ *   - log mode (optimized or classic): the transient loading screens show a
+ *     wall of related but meaningless log lines built from professional boot
+ *     terms ("Kernel Patching", "Verifying boot image", ...).  Each line
+ *     starts with a pseudo-random [PID NNNN].  The optimized style draws the
+ *     glyphs straight onto the frame buffer, blended over the existing
+ *     background, so the text takes exactly as many pixels as its characters
+ *     need with no black padding; the classic style prints the same lines on
+ *     the SimpleFont console, the way the earlier branch did.
+ *   - art mode: no logs at all; the character chosen in the "Character"
+ *     setting is shown centered on the screen as block art (a black stamp
+ *     behind it is allowed).
  *
- * The booting prompt additionally shows the character chosen in the "Art
- * Character" setting as block art; a black stamp behind the art is allowed.
- * The boot path interleaves the stream with the real loading steps, so
- * printing never delays the launch.
+ * In log mode the boot path interleaves the stream with the real loading
+ * steps, so printing never delays the launch.
  */
 #define SFB_PRETENTIOUS_LINES    160
 #define SFB_PRETENTIOUS_DELAY_MS 2
@@ -839,24 +846,29 @@ STATIC CONST SFB_PRETENTIOUS_STATUS  mSfbPretentiousStatus[5] = {
 STATIC BOOLEAN  gSfbPretentiousActive = FALSE;
 STATIC UINTN    gSfbPretentiousIndex = 0;
 STATIC UINT32   gSfbPretentiousY = 0;
+STATIC UINTN    gSfbPretentiousMode = SFB_PRETENTIOUS_LOG_OPTIMIZED;
 
 VOID
 SfbPretentiousBegin (VOID)
 {
+  SFB_SETTINGS  S;
+
+  SfbSettingsGet (&S);
   gSfbPretentiousActive = TRUE;
   gSfbPretentiousIndex = 0;
   gSfbPretentiousY = 0;
+  gSfbPretentiousMode = S.PretentiousMode;
 }
 
 /*
- * Draw the chosen character as block art from the embedded glyph: on the
- * frame buffer every "pixel" of the glyph becomes an SFB_ART_CELL_PX square
- * on a black stamp, on the text console it is printed as rows of '#'.
- * Returns the pixel height of the art block, or 0 on the text console.
+ * Show the chosen character centered on the screen as block art made from
+ * the embedded glyph: on the frame buffer every "pixel" of the glyph becomes
+ * an SFB_ART_CELL_PX square on a black stamp, on the text console it is
+ * printed as rows of '#'.  Art mode outputs no log lines.
  */
 STATIC
-UINT32
-SfbPretentiousDrawArt (IN UINTN Choice)
+VOID
+SfbPretentiousShowArt (IN UINTN Choice)
 {
   CHAR16  Ch = (Choice == 1) ? L'天' : ((Choice == 2) ? L'牛' : L'豪');
   UINT32  Offset;
@@ -864,20 +876,27 @@ SfbPretentiousDrawArt (IN UINTN Choice)
   UINT8   GlyphAdvance;
 
   if (!SfbFontGetGlyph (Ch, &Offset, &GlyphWidth, &GlyphAdvance)) {
-    return 0;
+    return;
   }
 
   if (SfbGfxActive ()) {
-    UINT32  X = 12;
-    UINT32  Y = 12;
+    UINT32  W;
+    UINT32  H;
+    UINT32  ArtW;
+    UINT32  ArtH;
+    UINT32  X;
+    UINT32  Y;
     UINT32  Sx;
     UINT32  Sy;
 
+    SfbGfxGetScreen (&W, &H);
+    ArtW = GlyphWidth * SFB_ART_CELL_PX;
+    ArtH = SFB_FONT_CELL_H * SFB_ART_CELL_PX;
+    X = (W >= ArtW) ? (W - ArtW) / 2 : 0;
+    Y = (H >= ArtH) ? (H - ArtH) / 2 : 0;
+
     /* Black stamp behind the art is allowed in art mode. */
-    SfbGfxFillRect (X - 8, Y - 8,
-                    GlyphWidth * SFB_ART_CELL_PX + 16,
-                    SFB_FONT_CELL_H * SFB_ART_CELL_PX + 16,
-                    SFB_COLOR_BG);
+    SfbGfxFillRect (X - 8, Y - 8, ArtW + 16, ArtH + 16, SFB_COLOR_BG);
 
     for (Sy = 0; Sy < SFB_FONT_CELL_H; Sy++) {
       for (Sx = 0; Sx < GlyphWidth; Sx++) {
@@ -891,28 +910,35 @@ SfbPretentiousDrawArt (IN UINTN Choice)
         }
       }
     }
-
-    return Y + SFB_FONT_CELL_H * SFB_ART_CELL_PX + 8;
   } else {
+    UINTN  Cols;
+    UINTN  Rows;
+    UINTN  Pad;
     UINTN  Sx;
     UINTN  Sy;
+
+    SfbScreenSize (&Cols, &Rows);
+    Pad = (Cols > GlyphWidth) ? (Cols - GlyphWidth) / 2 : 0;
 
     gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_TITLE);
     for (Sy = 0; Sy < SFB_FONT_CELL_H; Sy++) {
       CHAR16  Line[SFB_FONT_MAX_W + 1];
+      UINTN   Li = 0;
 
+      while (Li < Pad) {
+        Line[Li++] = L' ';
+      }
       for (Sx = 0; Sx < GlyphWidth; Sx++) {
         UINTN   BitIndex = Sy * GlyphWidth + Sx;
         UINT8   Alpha = (UINT8)(gSfbFontBitmap[Offset + BitIndex / 2] >>
                                 ((BitIndex & 1) ? 0 : 4)) & 0xF;
 
-        Line[Sx] = (Alpha >= SFB_FONT_MAX_ALPHA / 2) ? L'#' : L' ';
+        Line[Li++] = (Alpha >= SFB_FONT_MAX_ALPHA / 2) ? L'#' : L' ';
       }
-      Line[GlyphWidth] = L'\0';
+      Line[Li] = L'\0';
       Print (L"%s\r\n", Line);
     }
     gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
-    return 0;
   }
 }
 
@@ -934,53 +960,26 @@ SfbPretentiousEmit (IN UINTN Count)
                    ARRAY_SIZE (mSfbPretentiousAction);
     UINTN   St   = (gSfbPretentiousIndex * 3 + 2) %
                    ARRAY_SIZE (mSfbPretentiousStatus);
-    UINT32  Sec  = (UINT32)(gSfbPretentiousIndex / 100);
-    UINT32  Msec = (UINT32)((gSfbPretentiousIndex % 100) * 10);
-    UINT32  Pct  = (UINT32)((gSfbPretentiousIndex * 100) /
-                            SFB_PRETENTIOUS_LINES);
+    UINT32  Pid  = (UINT32)((gSfbPretentiousIndex * 7919 + 12345) % 9999);
     CHAR16  Line[SFB_DESC_CHARS + 16];
 
-    if ((gSfbPretentiousIndex % 7) == 6) {
-      /* TUI-style progress bar line. */
-      CHAR16  Bar[14];
-      UINTN   Filled = (Pct * 10) / 100;
-      UINTN   Bi;
+    UnicodeSPrint (Line, sizeof (Line), L"[PID %04u] %s: %s ... ",
+                   Pid, mSfbPretentiousModule[Mod], mSfbPretentiousAction[Act]);
 
-      Bar[0] = L'[';
-      for (Bi = 0; Bi < 10; Bi++) {
-        Bar[1 + Bi] = (Bi < Filled) ? L'#' : L'-';
-      }
-      Bar[11] = L']';
-      Bar[12] = L'\0';
-
-      UnicodeSPrint (Line, sizeof (Line), L"[%04u.%03u] %s: %s %3u%%",
-                     Sec, Msec, mSfbPretentiousModule[Mod], Bar, Pct);
-
-      if (SfbGfxActive ()) {
-        SfbGfxDrawTextTransparent (Line, 0, gSfbPretentiousY, SFB_COLOR_TEXT);
-      } else {
-        gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_LOG_NORMAL);
-        Print (L"%s\r\n", Line);
-      }
+    if (SfbGfxActive () && gSfbPretentiousMode == SFB_PRETENTIOUS_LOG_OPTIMIZED) {
+      SfbGfxDrawTextTransparent (Line, 0, gSfbPretentiousY, SFB_COLOR_TEXT);
+      SfbGfxDrawTextTransparent (mSfbPretentiousStatus[St].Text,
+                                 SfbGfxTextWidth (Line), gSfbPretentiousY,
+                                 mSfbPretentiousStatus[St].Color);
     } else {
-      UnicodeSPrint (Line, sizeof (Line), L"[%04u.%03u] %s: %s ... ",
-                     Sec, Msec, mSfbPretentiousModule[Mod],
-                     mSfbPretentiousAction[Act]);
-
-      if (SfbGfxActive ()) {
-        SfbGfxDrawTextTransparent (Line, 0, gSfbPretentiousY, SFB_COLOR_TEXT);
-        SfbGfxDrawTextTransparent (mSfbPretentiousStatus[St].Text,
-                                   SfbGfxTextWidth (Line), gSfbPretentiousY,
-                                   mSfbPretentiousStatus[St].Color);
-      } else {
-        gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_LOG_NORMAL);
-        Print (L"%s", Line);
-        gST->ConOut->SetAttribute (gST->ConOut, mSfbPretentiousStatus[St].Attr);
-        Print (L"%s\r\n", mSfbPretentiousStatus[St].Text);
-      }
+      /* Classic style (or no GOP): plain SimpleFont console output. */
+      gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_LOG_NORMAL);
+      Print (L"%s", Line);
+      gST->ConOut->SetAttribute (gST->ConOut, mSfbPretentiousStatus[St].Attr);
+      Print (L"%s\r\n", mSfbPretentiousStatus[St].Text);
     }
 
-    if (SfbGfxActive ()) {
+    if (SfbGfxActive () && gSfbPretentiousMode == SFB_PRETENTIOUS_LOG_OPTIMIZED) {
       gSfbPretentiousY += SFB_FONT_CELL_H + 4;
     }
   }
@@ -1003,9 +1002,13 @@ SfbShowFastbootMode (VOID)
 
   SfbSettingsGet (&S);
   if (S.Pretentious) {
-    SfbPretentiousBegin ();
-    while (SfbPretentiousEmit (SFB_PRETENTIOUS_BATCH)) {
-      gBS->Stall (SFB_PRETENTIOUS_DELAY_MS * 1000);
+    if (S.PretentiousMode == SFB_PRETENTIOUS_ART) {
+      SfbPretentiousShowArt (S.PretentiousArt);
+    } else {
+      SfbPretentiousBegin ();
+      while (SfbPretentiousEmit (SFB_PRETENTIOUS_BATCH)) {
+        gBS->Stall (SFB_PRETENTIOUS_DELAY_MS * 1000);
+      }
     }
     return;
   }
@@ -1055,14 +1058,12 @@ SfbShowBootingScreen (IN CONST CHAR16 *Name, IN BOOLEAN ClearScreen)
   }
 
   if (S.Pretentious) {
-    SfbPretentiousBegin ();
-    if (SfbGfxActive ()) {
-      gSfbPretentiousY = SfbPretentiousDrawArt (S.PretentiousArt);
-      if (gSfbPretentiousY == 0) {
-        gSfbPretentiousY = SFB_FONT_CELL_H + 4;
-      }
+    if (S.PretentiousMode == SFB_PRETENTIOUS_ART) {
+      SfbPretentiousShowArt (S.PretentiousArt);
+    } else {
+      SfbPretentiousBegin ();
+      SfbPretentiousEmit (SFB_PRETENTIOUS_BATCH);
     }
-    SfbPretentiousEmit (SFB_PRETENTIOUS_BATCH);
     return;
   }
 
@@ -1309,6 +1310,24 @@ SfbRunPinGate (VOID)
   }
 }
 
+#define SFB_SETTINGS_ROW_COUNT  9
+
+/* TRUE when the settings row may be selected; disabled rows are dimmed and
+ * skipped by the cursor.  "Change PIN" needs the PIN on, and the Pretentious
+ * Mode / Character rows need Pretentious Mode on. */
+STATIC
+BOOLEAN
+SfbSettingsRowEnabled (IN CONST SFB_SETTINGS *S, IN UINTN Index)
+{
+  if (Index == 2) {
+    return S->PinEnabled;
+  }
+  if (Index == 6 || Index == 7) {
+    return S->Pretentious;
+  }
+  return TRUE;
+}
+
 VOID
 SfbRunSettingsMenu (VOID)
 {
@@ -1320,6 +1339,9 @@ SfbRunSettingsMenu (VOID)
 
   while (TRUE) {
     UINTN   Index;
+    UINTN   Start;
+    UINTN   Last;
+    UINTN   Visible;
     CHAR16  RowText[SFB_DESC_CHARS + 8];
 
     if (Rebuild) {
@@ -1328,7 +1350,14 @@ SfbRunSettingsMenu (VOID)
     }
 
     SfbBeginScreen (SfbStr (StrSettings), NULL);
-    for (Index = 0; Index < 8; Index++) {
+    Visible = SfbVisibleRows ();
+    Start = SfbWindowStart (Cursor, SFB_SETTINGS_ROW_COUNT, Visible);
+    Last = Start + Visible;
+    if (Last > SFB_SETTINGS_ROW_COUNT) {
+      Last = SFB_SETTINGS_ROW_COUNT;
+    }
+
+    for (Index = Start; Index < Last; Index++) {
       CONST CHAR16  *Label = NULL;
       CONST CHAR16  *Value = NULL;
 
@@ -1358,12 +1387,20 @@ SfbRunSettingsMenu (VOID)
         Value = S.Pretentious ? SfbStr (StrOn) : SfbStr (StrOff);
         break;
       case 6:
+        Label = SfbStr (StrPretentiousMode);
+        Value = (S.PretentiousMode == SFB_PRETENTIOUS_LOG_CLASSIC)
+                  ? SfbStr (StrLogClassic)
+                  : (S.PretentiousMode == SFB_PRETENTIOUS_ART)
+                      ? SfbStr (StrArtMode)
+                      : SfbStr (StrLogOptimized);
+        break;
+      case 7:
         Label = SfbStr (StrPretentiousArt);
         Value = (S.PretentiousArt == 1) ? SfbStr (StrArtTian)
                : (S.PretentiousArt == 2) ? SfbStr (StrArtNiu)
                                          : SfbStr (StrArtHao);
         break;
-      case 7:
+      case 8:
       default:
         Label = SfbStr (StrBack);
         break;
@@ -1377,13 +1414,31 @@ SfbRunSettingsMenu (VOID)
       } else {
         StrnCpyS (RowText, SFB_DESC_CHARS + 8, Label, SFB_DESC_CHARS + 7);
       }
-      SfbDrawRow ((BOOLEAN)(Index == Cursor), L" ", RowText);
+      SfbDrawRow ((BOOLEAN)(Index == Cursor),
+                  SfbSettingsRowEnabled (&S, Index), L" ", RowText);
+    }
+
+    if (Last < SFB_SETTINGS_ROW_COUNT) {
+      CHAR16  Note[32];
+
+      UnicodeSPrint (Note, sizeof (Note), SfbStr (StrMore),
+                     (UINT32)(SFB_SETTINGS_ROW_COUNT - Last));
+      SfbPanelNote (Note);
     }
     SfbEndScreen (SfbStr (StrKeyNavSelect));
 
     Key = SfbWaitForKey (0);
     if (Key == SfbKeyUp || Key == SfbKeyDown) {
-      SfbMoveCursor (&Cursor, 8, Key);
+      UINTN  Guard;
+
+      SfbMoveCursor (&Cursor, SFB_SETTINGS_ROW_COUNT, Key);
+      /* Skip dimmed, unavailable rows. */
+      for (Guard = 0;
+           Guard < SFB_SETTINGS_ROW_COUNT &&
+           !SfbSettingsRowEnabled (&S, Cursor);
+           Guard++) {
+        SfbMoveCursor (&Cursor, SFB_SETTINGS_ROW_COUNT, Key);
+      }
       continue;
     }
 
@@ -1433,12 +1488,22 @@ SfbRunSettingsMenu (VOID)
       break;
 
     case 6:
-      S.PretentiousArt = (S.PretentiousArt + 1) % 3;
-      SaveStatus = SfbSettingsSave (&S);
+      if (S.Pretentious) {
+        S.PretentiousMode = (S.PretentiousMode + 1) % 3;
+        SaveStatus = SfbSettingsSave (&S);
+      }
       Rebuild = TRUE;
       break;
 
     case 7:
+      if (S.Pretentious) {
+        S.PretentiousArt = (S.PretentiousArt + 1) % 3;
+        SaveStatus = SfbSettingsSave (&S);
+      }
+      Rebuild = TRUE;
+      break;
+
+    case 8:
     default:
       return;
     }
@@ -1474,9 +1539,13 @@ SfbShowEnteringMenu (VOID)
 
   SfbSettingsGet (&S);
   if (S.Pretentious) {
-    SfbPretentiousBegin ();
-    while (SfbPretentiousEmit (SFB_PRETENTIOUS_BATCH)) {
-      gBS->Stall (SFB_PRETENTIOUS_DELAY_MS * 1000);
+    if (S.PretentiousMode == SFB_PRETENTIOUS_ART) {
+      SfbPretentiousShowArt (S.PretentiousArt);
+    } else {
+      SfbPretentiousBegin ();
+      while (SfbPretentiousEmit (SFB_PRETENTIOUS_BATCH)) {
+        gBS->Stall (SFB_PRETENTIOUS_DELAY_MS * 1000);
+      }
     }
   } else {
     SfbShowBanner (SfbStr (StrEnteringBootMenu), SfbStr (StrKeyNavSelect));
@@ -1526,9 +1595,9 @@ SfbDrawMenu (IN CONST SFB_MENU_STATE *Menu,
       CHAR16  Text[SFB_DESC_CHARS + 4];
 
       UnicodeSPrint (Text, sizeof (Text), L"%s >", Entry->Desc);
-      SfbDrawRow ((BOOLEAN)(Index == Cursor), Marker, Text);
+      SfbDrawRow ((BOOLEAN)(Index == Cursor), TRUE, Marker, Text);
     } else {
-      SfbDrawRow ((BOOLEAN)(Index == Cursor), Marker, Entry->Desc);
+      SfbDrawRow ((BOOLEAN)(Index == Cursor), TRUE, Marker, Entry->Desc);
     }
   }
 

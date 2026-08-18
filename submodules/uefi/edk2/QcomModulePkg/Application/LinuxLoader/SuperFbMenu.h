@@ -373,10 +373,12 @@ SfbBootLog (IN CONST CHAR16 *Text);
 /*
  * Start the Pretentious Mode log stream over.  Until SfbPretentiousBegin is
  * called again, SfbPretentiousEmit prints the next batch of short, coloured
- * (OK green / WARN yellow / SKIP cyan), meaningless lines on the text
- * console without clearing the screen, and returns TRUE while lines remain.
- * The boot path interleaves these batches with the real loading steps so the
- * launch is never delayed by the log output.
+ * (OK green / WARN yellow / SKIP cyan), meaningless lines with a pseudo
+ * random [PID NNNN] prefix, and returns TRUE while lines remain.  The
+ * optimized style draws glyph-only text on the frame buffer, the classic
+ * style uses the SimpleFont console; the boot path interleaves these batches
+ * with the real loading steps so the launch is never delayed by the log
+ * output.
  */
 VOID
 SfbPretentiousBegin (VOID);
@@ -411,6 +413,7 @@ SfbEndScreen (IN CONST CHAR16 *Footer);
 
 VOID
 SfbDrawRow (IN BOOLEAN      Selected,
+            IN BOOLEAN      Enabled,
             IN CONST CHAR16 *Marker,
             IN CONST CHAR16 *Text);
 

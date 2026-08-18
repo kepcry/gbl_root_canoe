@@ -293,7 +293,7 @@ SfbDriverActionMenu (IN EFI_HANDLE   Volume,
     SfbBeginScreen (SfbStr (StrEfiDriver), FullPath);
 
     for (Index = 0; Index < ARRAY_SIZE (Actions); Index++) {
-      SfbDrawRow ((BOOLEAN)(Index == Cursor), L" ", Actions[Index]);
+      SfbDrawRow ((BOOLEAN)(Index == Cursor), TRUE, L" ", Actions[Index]);
     }
 
     SfbEndScreen (SfbStr (StrKeyNavSelect));
@@ -363,7 +363,7 @@ SfbEfiActionMenu (IN EFI_HANDLE   Volume,
     SfbBeginScreen (SfbStr (StrEfiApplication), FullPath);
 
     for (Index = 0; Index < ARRAY_SIZE (Actions); Index++) {
-      SfbDrawRow ((BOOLEAN)(Index == Cursor), L" ", Actions[Index]);
+      SfbDrawRow ((BOOLEAN)(Index == Cursor), TRUE, L" ", Actions[Index]);
     }
 
     SfbEndScreen (SfbStr (StrKeyNavSelect));
@@ -483,7 +483,7 @@ SfbBrowseVolume (IN EFI_HANDLE   Volume,
         Marker = L"   ";
       }
 
-      SfbDrawRow ((BOOLEAN)(Index == Cursor), Marker, List[Index].Name);
+      SfbDrawRow ((BOOLEAN)(Index == Cursor), TRUE, Marker, List[Index].Name);
     }
 
     if (Last < Count) {
@@ -644,9 +644,11 @@ SfbRunFileBrowser (VOID)
 
     for (Index = Start; Index < Last; Index++) {
       if (Index == VolumeCount) {
-        SfbDrawRow ((BOOLEAN)(Index == Cursor), L" ", SfbStr (StrBack));
+        SfbDrawRow ((BOOLEAN)(Index == Cursor), TRUE, L" ",
+                    SfbStr (StrBack));
       } else {
-        SfbDrawRow ((BOOLEAN)(Index == Cursor), L"[V]", Rows[Index].Label);
+        SfbDrawRow ((BOOLEAN)(Index == Cursor), TRUE, L"[V]",
+                    Rows[Index].Label);
       }
     }
 

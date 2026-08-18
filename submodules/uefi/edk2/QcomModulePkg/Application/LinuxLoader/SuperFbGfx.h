@@ -28,6 +28,7 @@
 #define SFB_COLOR_OK        0x0055CC66   /* green log status           */
 #define SFB_COLOR_WARN      0x00E0C04C   /* yellow log status          */
 #define SFB_COLOR_SKIP      0x0055BBCC   /* cyan log status            */
+#define SFB_COLOR_DISABLED  0x00555060   /* dimmed, unavailable row     */
 
 /*
  * Locate the graphics output protocol.  Returns FALSE when no usable GOP is
