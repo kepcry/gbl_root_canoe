@@ -526,7 +526,7 @@ SfbReadFileBytes (IN EFI_FILE_PROTOCOL *Root,
 {
   EFI_STATUS         Status;
   EFI_FILE_PROTOCOL  *File = NULL;
-  UINTN              ReadSize = MaxBytes;
+  UINTN              Total = 0;
 
   *BytesRead = 0;
 
@@ -535,16 +535,31 @@ SfbReadFileBytes (IN EFI_FILE_PROTOCOL *Root,
     return EFI_ERROR (Status) ? Status : EFI_NOT_FOUND;
   }
 
-  Status = File->Read (File, &ReadSize, Buffer);
-  File->Close (File);
+  /*
+   * The Simple File System contract allows a driver to satisfy a request in
+   * parts, and some implementations cap a single transfer.  Loop until the
+   * buffer is full or the end of the file is reached, so large images (and
+   * anything else) read reliably.
+   */
+  while (Total < MaxBytes) {
+    UINTN  ReadSize = MaxBytes - Total;
 
-  if (EFI_ERROR (Status)) {
-    return Status;
+    Status = File->Read (File, &ReadSize, (UINT8 *)Buffer + Total);
+    if (EFI_ERROR (Status)) {
+      break;
+    }
+    Total += ReadSize;
+    if (ReadSize == 0) {
+      Status = EFI_SUCCESS;   /* end of file */
+      break;
+    }
   }
 
-  *BytesRead = ReadSize;
+  File->Close (File);
 
-  return EFI_SUCCESS;
+  *BytesRead = Total;
+
+  return Status;
 }
 
 /*

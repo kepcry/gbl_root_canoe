@@ -926,12 +926,13 @@ SfbPretentiousShowArt (IN UINTN Choice)
 }
 
 /*
- * Custom Mode: read \efisp\logo.bmp (a BMP image) from the ext4 persist
- * volume and show it centered on the physical screen.  Any failure - file
- * missing or unreadable, not a BMP, unsupported format, image out of range,
- * no GOP - is silently ignored so the launch always continues.
+ * Custom Mode: read \efisp\logo.bmp (a BMP image) from the project's already
+ * mounted boot volumes (ext4 persist first, FAT32 fallback) and show it
+ * centered on the physical screen.  Any failure - file missing or unreadable,
+ * not a BMP, unsupported format, image out of range, no GOP - is silently
+ * ignored so the launch always continues.
  */
-#define SFB_LOGO_MAX_BYTES  (4 * 1024 * 1024)
+#define SFB_LOGO_MAX_BYTES  (16 * 1024 * 1024)
 #define SFB_LOGO_MAX_DIM    4096
 
 STATIC
@@ -942,9 +943,9 @@ SfbPretentiousShowLogo (VOID)
   EFI_HANDLE                       *Volumes = NULL;
   UINTN                            VolumeCount = 0;
   UINTN                            VolumeIndex;
-  EFI_FILE_PROTOCOL                *Root = NULL;
   UINT8                            *Buffer = NULL;
   UINTN                            BytesRead = 0;
+  BOOLEAN                          Found = FALSE;
   UINT32                           PixelOffset;
   UINT32                           HeightRaw;
   UINT32                           Width;
@@ -966,36 +967,48 @@ SfbPretentiousShowLogo (VOID)
 
   Status = SfbLocateVolumes (&Volumes, &VolumeCount);
   if (EFI_ERROR (Status) || Volumes == NULL) {
-    goto done;
-  }
-
-  for (VolumeIndex = 0; VolumeIndex < VolumeCount; VolumeIndex++) {
-    if (SfbIsExt4Volume (Volumes[VolumeIndex])) {
-      break;
-    }
-  }
-  if (VolumeIndex >= VolumeCount) {
-    goto done;
-  }
-
-  Status = SfbOpenVolumeRoot (Volumes[VolumeIndex], &Root);
-  if (EFI_ERROR (Status) || Root == NULL) {
+    DEBUG ((EFI_D_ERROR, "SFB: logo: no volumes: %r\n", Status));
     goto done;
   }
 
   Buffer = AllocateZeroPool (SFB_LOGO_MAX_BYTES);
   if (Buffer == NULL) {
+    DEBUG ((EFI_D_ERROR, "SFB: logo: out of memory\n"));
     goto done;
   }
 
-  Status = SfbReadFileBytes (Root, L"\\efisp\\logo.bmp", Buffer,
-                             SFB_LOGO_MAX_BYTES, &BytesRead);
-  if (EFI_ERROR (Status) || BytesRead < 54) {
+  /* Try the project's own mounted volumes: ext4 persist has the \efisp boot
+   * root, FAT32 media may carry an efisp folder too. */
+  for (VolumeIndex = 0; VolumeIndex < VolumeCount; VolumeIndex++) {
+    EFI_FILE_PROTOCOL  *Root = NULL;
+
+    Status = SfbOpenVolumeRoot (Volumes[VolumeIndex], &Root);
+    if (EFI_ERROR (Status) || Root == NULL) {
+      continue;
+    }
+
+    BytesRead = 0;
+    Status = SfbReadFileBytes (Root, L"\\efisp\\logo.bmp", Buffer,
+                               SFB_LOGO_MAX_BYTES, &BytesRead);
+    Root->Close (Root);
+
+    if (!EFI_ERROR (Status) && BytesRead >= 54) {
+      Found = TRUE;
+      break;
+    }
+    DEBUG ((EFI_D_VERBOSE, "SFB: logo: volume %u read failed: %r\n",
+            (UINT32)VolumeIndex, Status));
+  }
+
+  if (!Found) {
+    DEBUG ((EFI_D_INFO, "SFB: logo: \\efisp\\logo.bmp not readable\n"));
     goto done;
   }
 
-  /* BITMAPFILEHEADER ('BM') + BITMAPINFOHEADER, uncompressed 24/32bpp. */
-  if (Buffer[0] != 'B' || Buffer[1] != 'M' || Buffer[14] != 40) {
+  /* BITMAPFILEHEADER ('BM') + a DIB header of at least 40 bytes (accepts
+   * BITMAPINFOHEADER as well as V4/V5), uncompressed 24/32bpp. */
+  if (Buffer[0] != 'B' || Buffer[1] != 'M' || Buffer[14] < 40) {
+    DEBUG ((EFI_D_ERROR, "SFB: logo: not a BMP\n"));
     goto done;
   }
   PixelOffset = (UINT32)Buffer[10] | ((UINT32)Buffer[11] << 8) |
@@ -1013,15 +1026,19 @@ SfbPretentiousShowLogo (VOID)
   if (Width == 0 || Height == 0 ||
       Width > SFB_LOGO_MAX_DIM || Height > SFB_LOGO_MAX_DIM ||
       (Bpp != 24 && Bpp != 32) || Compression != 0) {
+    DEBUG ((EFI_D_ERROR, "SFB: logo: unsupported %ux%u bpp=%u comp=%u\n",
+            Width, Height, Bpp, Compression));
     goto done;
   }
   RowSize = ((Bpp * Width + 31) / 32) * 4;
   if ((UINTN)PixelOffset + (UINTN)RowSize * Height > BytesRead) {
+    DEBUG ((EFI_D_ERROR, "SFB: logo: truncated image data\n"));
     goto done;
   }
 
   Pixels = AllocateZeroPool (Width * Height * sizeof (*Pixels));
   if (Pixels == NULL) {
+    DEBUG ((EFI_D_ERROR, "SFB: logo: pixel buffer allocation failed\n"));
     goto done;
   }
 
@@ -1048,6 +1065,8 @@ SfbPretentiousShowLogo (VOID)
   /* Clean black backdrop, then the logo, absolutely centred. */
   SfbGfxClear (SFB_COLOR_BG);
   SfbGfxBltImage (X, Y, Width, Height, Pixels);
+  DEBUG ((EFI_D_INFO, "SFB: logo: shown %ux%u at %u,%u\n",
+          Width, Height, X, Y));
 
 done:
   if (Pixels != NULL) {
@@ -1055,9 +1074,6 @@ done:
   }
   if (Buffer != NULL) {
     FreePool (Buffer);
-  }
-  if (Root != NULL) {
-    Root->Close (Root);
   }
   if (Volumes != NULL) {
     FreePool (Volumes);
