@@ -1065,6 +1065,13 @@ SfbLaunchEntry (IN CONST SFB_BOOT_ENTRY *Entry,
    */
   SfbShowBootingScreen (Entry->Desc, ClearScreen);
 
+  {
+    CHAR16  Log[SFB_PATH_CHARS + 16];
+
+    UnicodeSPrint (Log, sizeof (Log), L"Loading %s", Entry->Path);
+    SfbBootLog (Log);
+  }
+
   /*
    * Committing the default before the launch is deliberate: an image that boots
    * successfully never comes back to do it afterwards. A "no default" entry
@@ -1089,9 +1096,11 @@ SfbLaunchEntry (IN CONST SFB_BOOT_ENTRY *Entry,
   if (EFI_ERROR (Status)) {
     DEBUG ((EFI_D_ERROR, "SFB: LoadImage '%s' failed: %r\n",
             Entry->Path, Status));
+    SfbBootLog (L"Load failed");
     return Status;
   }
 
+  SfbBootLog (L"Starting image...");
   Status = gBS->StartImage (ImageHandle, &ExitDataSize, &ExitData);
   DEBUG ((EFI_D_INFO, "SFB: '%s' returned: %r\n", Entry->Path, Status));
 

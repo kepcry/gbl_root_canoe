@@ -79,6 +79,7 @@ found at
  */
 
 #include <Uefi.h>
+#include <Library/BaseLib.h>
 #include <Library/DebugLib.h>
 #include <Library/Debug.h>
 #include <Library/LinuxLoaderLib.h>
@@ -355,11 +356,13 @@ EFI_STATUS HandleUsbEvents (VOID)
   if (UsbDeviceEventDeviceStateChange == Msg) {
     if (UsbDeviceStateConnected == Payload.DeviceState) {
       DEBUG ((EFI_D_VERBOSE, "Fastboot Device connected\n"));
+      FastbootScreenLog (L"Host connected");
       /* Queue receive buffer */
       Status = Fbd.UsbDeviceProtocol->Send (0x1, 511, Fbd.gRxBuffer);
     }
     if (UsbDeviceStateDisconnected == Payload.DeviceState) {
       DEBUG ((EFI_D_VERBOSE, "Fastboot Device disconnected\n"));
+      FastbootScreenLog (L"Host disconnected");
     }
   } else if (UsbDeviceEventTransferNotification == Msg) {
     /* Check if the transfer notification is on the Bulk EP and process it*/
@@ -414,6 +417,15 @@ STATIC CONST CHAR16 *mFbActionRow[FB_ACTION_ROWS] = {
 };
 STATIC UINTN mFbActionCursor = 0;
 
+/* Optional graphical screen hook installed by the hosting application; when
+ * NULL the built-in text-console screen is used. */
+STATIC FASTBOOT_SCREEN_DRAW mFastbootDrawHook = NULL;
+
+/* Rolling on-screen operation log (USB connect / fastboot commands). */
+STATIC CHAR16 mFbLog[FASTBOOT_LOG_LINES][FASTBOOT_LOG_CHARS];
+STATIC UINTN  mFbLogCount = 0;
+STATIC UINTN  mFbLogNext = 0;
+
 #define FB_ATTR_NORMAL    EFI_TEXT_ATTR (EFI_LIGHTGRAY, EFI_BLACK)
 #define FB_ATTR_SELECTED  EFI_TEXT_ATTR (EFI_BLACK, EFI_LIGHTGRAY)
 #define FB_ATTR_TITLE     EFI_TEXT_ATTR (EFI_WHITE, EFI_BLACK)
@@ -428,7 +440,19 @@ STATIC
 VOID
 FastbootDrawModeScreen (VOID)
 {
-  UINTN  Index;
+  UINTN              Index;
+  UINTN              LogIndex;
+  CONST CHAR16       *LogLines[FASTBOOT_LOG_LINES];
+
+  if (mFastbootDrawHook != NULL) {
+    for (Index = 0; Index < mFbLogCount; Index++) {
+      LogLines[Index] =
+        mFbLog[(mFbLogNext + FASTBOOT_LOG_LINES - mFbLogCount + Index)
+               % FASTBOOT_LOG_LINES];
+    }
+    mFastbootDrawHook (mFbActionCursor, mFbLogCount, LogLines);
+    return;
+  }
 
   gST->ConOut->SetAttribute (gST->ConOut, FB_ATTR_TITLE);
   gST->ConOut->ClearScreen (gST->ConOut);
@@ -447,6 +471,12 @@ FastbootDrawModeScreen (VOID)
 
   gST->ConOut->SetAttribute (gST->ConOut, FB_ATTR_NORMAL);
   Print (L"\r\nVol Up/Down: move   Power: select\r\n");
+
+  for (LogIndex = 0; LogIndex < mFbLogCount; LogIndex++) {
+    Print (L"%s\r\n",
+           mFbLog[(mFbLogNext + FASTBOOT_LOG_LINES - mFbLogCount + LogIndex)
+                  % FASTBOOT_LOG_LINES]);
+  }
 }
 
 STATIC
@@ -460,6 +490,37 @@ FastbootShowActionScreen (IN CONST CHAR16 *Text)
   Print (L"%s\r\n", Text);
 
   gST->ConOut->SetAttribute (gST->ConOut, FB_ATTR_NORMAL);
+}
+
+EFI_STATUS
+FastbootSetScreenHooks (IN FASTBOOT_SCREEN_DRAW Draw)
+{
+  mFastbootDrawHook = Draw;
+  return EFI_SUCCESS;
+}
+
+VOID
+FastbootScreenLog (IN CONST CHAR16 *Text)
+{
+  if (Text == NULL) {
+    return;
+  }
+
+  StrnCpyS (mFbLog[mFbLogNext], FASTBOOT_LOG_CHARS, Text,
+            FASTBOOT_LOG_CHARS - 1);
+  mFbLogNext = (mFbLogNext + 1) % FASTBOOT_LOG_LINES;
+  if (mFbLogCount < FASTBOOT_LOG_LINES) {
+    mFbLogCount++;
+  }
+
+  if (mFastbootDrawHook != NULL) {
+    /* The graphical screen repaints so the new line appears in place. */
+    FastbootDrawModeScreen ();
+  } else {
+    /* Text console: print the line below the fastboot screen; the screen
+     * redraw replays the whole ring so the log survives key presses. */
+    Print (L"%s\r\n", Text);
+  }
 }
 
 /*

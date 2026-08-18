@@ -20,6 +20,8 @@
 #include <Library/UefiLib.h>
 #include <Protocol/SimpleTextIn.h>
 
+#include <FastbootLib/FastbootMain.h>
+
 #include "SuperFbGfx.h"
 #include "SuperFbLang.h"
 #include "SuperFbSettings.h"
@@ -132,6 +134,9 @@ SfbWaitForKey (IN UINT32 TimeoutMs)
 STATIC UINTN  gSfbPanelWidth  = 0;
 STATIC UINTN  gSfbPanelLeft   = 0;
 STATIC UINTN  gSfbPanelExtra  = 0;
+/* Subtitle (the browser's path) is deferred to the bottom of the panel so the
+ * selection bar painted over the list rows can never reach it. */
+STATIC CONST CHAR16  *gSfbPanelSubtitle = NULL;
 
 STATIC
 VOID
@@ -319,8 +324,8 @@ SfbPanelNote (IN CONST CHAR16 *Text)
 
 /*
  * The graphical path draws the same panel as the text path but on the frame
- * buffer with the embedded 24x24 font.  The panel is a full-width band a
- * third of the screen tall, vertically centred.
+ * buffer with the embedded 32px font.  The panel is a full-width band a third
+ * of the screen tall, vertically centred.
  */
 STATIC UINT32  gSfbGfxPanelTop    = 0;
 STATIC UINT32  gSfbGfxPanelH      = 0;
@@ -329,6 +334,8 @@ STATIC UINT32  gSfbGfxRowH        = 52;
 STATIC UINT32  gSfbGfxFooterY     = 0;
 STATIC UINTN   gSfbGfxRowIndex    = 0;
 STATIC UINTN   gSfbGfxVisibleRows = SFB_VISIBLE_ROWS;
+/* Same deferred subtitle as the text path, drawn at the bottom of the panel. */
+STATIC CONST CHAR16  *gSfbGfxSubtitle = NULL;
 
 /* Copy Text into Out (OutChars includes the NUL), appending "..." when cut. */
 STATIC
@@ -383,10 +390,15 @@ SfbGfxPanelBegin (IN CONST CHAR16 *Title, IN CONST CHAR16 *Subtitle)
   UINT32  W;
   UINT32  H;
   UINT32  TitleY;
-  UINT32  SubY;
+  UINT32  RowsFloor;
 
   SfbGfxGetScreen (&W, &H);
   gSfbGfxPanelH = H / 3;
+  /* A bottom-centred subtitle (the browser's path) needs a little extra room
+   * so it does not steal space from the list or collide with the footer. */
+  if (Subtitle != NULL) {
+    gSfbGfxPanelH += SFB_FONT_CELL_H + 20;
+  }
   if (gSfbGfxPanelH < 3 * SFB_FONT_CELL_H) {
     gSfbGfxPanelH = 3 * SFB_FONT_CELL_H;
   }
@@ -399,13 +411,16 @@ SfbGfxPanelBegin (IN CONST CHAR16 *Title, IN CONST CHAR16 *Subtitle)
                SFB_COLOR_ACCENT);
 
   TitleY = gSfbGfxPanelTop + 20;
-  SubY = (Subtitle != NULL) ? TitleY + SFB_FONT_CELL_H + 6
-                            : TitleY + SFB_FONT_CELL_H;
-  gSfbGfxRowsStart = SubY + 18;
+  gSfbGfxRowsStart = TitleY + SFB_FONT_CELL_H + 18;
   gSfbGfxFooterY = gSfbGfxPanelTop + gSfbGfxPanelH - 20 - SFB_FONT_CELL_H;
+  gSfbGfxSubtitle = Subtitle;
 
-  if (gSfbGfxFooterY > gSfbGfxRowsStart + 24) {
-    gSfbGfxVisibleRows = (gSfbGfxFooterY - gSfbGfxRowsStart) / gSfbGfxRowH;
+  /* Keep a clear band between the last list row and the footer for the
+   * subtitle, so the selection bar never paints over it. */
+  RowsFloor = (Subtitle != NULL) ? 8 + SFB_FONT_CELL_H + 8 : 8;
+  if (gSfbGfxFooterY > gSfbGfxRowsStart + RowsFloor) {
+    gSfbGfxVisibleRows =
+      (gSfbGfxFooterY - gSfbGfxRowsStart - RowsFloor) / gSfbGfxRowH;
   } else {
     gSfbGfxVisibleRows = 0;
   }
@@ -418,10 +433,6 @@ SfbGfxPanelBegin (IN CONST CHAR16 *Title, IN CONST CHAR16 *Subtitle)
   gSfbGfxRowIndex = 0;
 
   SfbGfxDrawCentered (Title, W, TitleY, SFB_COLOR_ACCENT, SFB_COLOR_PANEL);
-  if (Subtitle != NULL) {
-    SfbGfxDrawCentered (Subtitle, W, SubY, SFB_COLOR_ACCENT_D,
-                        SFB_COLOR_PANEL);
-  }
 }
 
 STATIC
@@ -490,6 +501,11 @@ SfbGfxPanelEnd (IN CONST CHAR16 *Footer)
   UINT32  H;
 
   SfbGfxGetScreen (&W, &H);
+  if (gSfbGfxSubtitle != NULL) {
+    SfbGfxDrawCentered (gSfbGfxSubtitle, W,
+                        gSfbGfxFooterY - SFB_FONT_CELL_H - 12,
+                        SFB_COLOR_ACCENT_D, SFB_COLOR_PANEL);
+  }
   if (Footer != NULL) {
     SfbGfxDrawCentered (Footer, W, gSfbGfxFooterY, SFB_COLOR_ACCENT_D,
                         SFB_COLOR_PANEL);
@@ -552,12 +568,15 @@ SfbBeginScreen (IN CONST CHAR16 *Title, IN CONST CHAR16 *Subtitle)
   SfbScreenSize (&Cols, &Rows);
   gSfbPanelWidth = SfbPanelWidth ();
   gSfbPanelLeft  = (Cols - gSfbPanelWidth) / 2;
+  gSfbPanelSubtitle = Subtitle;
 
   /*
-   * Fixed chrome: top border, blank, title, blank, [subtitle, blank], the
-   * visible list rows, blank, footer and bottom border.  The panel is then
-   * grown to at least a third of the screen height so it reads as a centred
-   * window no matter how short the list is.
+   * Fixed chrome: top border, blank, title, blank, the visible list rows,
+   * blank, [subtitle, blank,] footer and bottom border.  The subtitle is
+   * deferred to SfbEndScreen so it sits at the bottom of the window, clear of
+   * the selection bar the row drawing paints across the list.  The panel is
+   * then grown to at least a third of the screen height so it reads as a
+   * centred window no matter how short the list is.
    */
   Content = SFB_VISIBLE_ROWS + 7;
   if (Subtitle != NULL) {
@@ -578,10 +597,6 @@ SfbBeginScreen (IN CONST CHAR16 *Title, IN CONST CHAR16 *Subtitle)
   SfbPanelBlank ();
   SfbPanelCentered (Title, SFB_ATTR_TITLE);
   SfbPanelBlank ();
-  if (Subtitle != NULL) {
-    SfbPanelCentered (Subtitle, SFB_ATTR_FOOTER);
-    SfbPanelBlank ();
-  }
 }
 
 VOID
@@ -595,6 +610,10 @@ SfbEndScreen (IN CONST CHAR16 *Footer)
   UINTN  Index;
 
   SfbPanelBlank ();
+  if (gSfbPanelSubtitle != NULL) {
+    SfbPanelCentered (gSfbPanelSubtitle, SFB_ATTR_FOOTER);
+    SfbPanelBlank ();
+  }
   if (Footer != NULL) {
     SfbPanelCentered (Footer, SFB_ATTR_FOOTER);
   }
@@ -768,10 +787,123 @@ SfbShowFastbootMode (VOID)
 }
 
 /*
+ * Graphical fastboot mode screen, installed in the fastboot library when a GOP
+ * is available.  It keeps the fastboot layout - "FASTBOOT MODE" title, the
+ * Power Off / Restart action rows with the cursor highlighted, and the key
+ * hint - but renders it with the large embedded font, and shows the USB
+ * connect / fastboot command log at the very bottom of the window.
+ */
+#define SFB_FB_MAX_LOG_VISIBLE  4
+
+STATIC
+VOID
+SfbFastbootDrawScreen (IN UINTN Cursor,
+                       IN UINTN LogCount,
+                       IN CONST CHAR16 **LogLines)
+{
+  UINT32  W;
+  UINT32  H;
+  UINT32  PanelH;
+  UINT32  PanelTop;
+  UINT32  TitleY;
+  UINT32  RowY;
+  UINT32  RowH;
+  UINT32  HintY;
+  UINT32  LogBottom;
+  UINT32  LogAreaTop;
+  UINT32  LogY;
+  UINT32  VisibleLogs;
+  UINTN   Index;
+
+  SfbGfxGetScreen (&W, &H);
+
+  /* Size the window to its content: title, two action rows, key hint and up
+   * to four log lines, then centre it on the display. */
+  PanelH = 20 + SFB_FONT_CELL_H + 24
+           + 2 * (SFB_FONT_CELL_H + 20)
+           + 20 + SFB_FONT_CELL_H
+           + 12 + SFB_FB_MAX_LOG_VISIBLE * SFB_FONT_CELL_H + 16;
+  if (PanelH < 4 * SFB_FONT_CELL_H) {
+    PanelH = 4 * SFB_FONT_CELL_H;
+  }
+  if (PanelH > H) {
+    PanelH = H;
+  }
+  PanelTop = (H - PanelH) / 2;
+
+  SfbGfxClear (SFB_COLOR_BG);
+  SfbGfxFillRect (0, PanelTop, W, PanelH, SFB_COLOR_PANEL);
+  SfbGfxHLine (PanelTop, 0, W - 1, 2, SFB_COLOR_ACCENT);
+  SfbGfxHLine (PanelTop + PanelH - 2, 0, W - 1, 2, SFB_COLOR_ACCENT);
+
+  TitleY = PanelTop + 20;
+  SfbGfxDrawCentered (L"FASTBOOT MODE", W, TitleY, SFB_COLOR_ACCENT,
+                      SFB_COLOR_PANEL);
+
+  /* Same two action rows the text-console screen offers. */
+  RowH = SFB_FONT_CELL_H + 20;
+  RowY = TitleY + SFB_FONT_CELL_H + 24;
+  for (Index = 0; Index < 2; Index++) {
+    UINT32  Y = RowY + (UINT32)Index * RowH;
+
+    if (Index == Cursor) {
+      SfbGfxFillRect (48, Y, W - 96, SFB_FONT_CELL_H + 10, SFB_COLOR_SEL_BG);
+      SfbGfxDrawCentered ((Index == 0) ? L"Power Off" : L"Restart", W,
+                          Y + 5, SFB_COLOR_SEL_FG, SFB_COLOR_SEL_BG);
+    } else {
+      SfbGfxDrawCentered ((Index == 0) ? L"Power Off" : L"Restart", W,
+                          Y + 5, SFB_COLOR_TEXT, SFB_COLOR_PANEL);
+    }
+  }
+
+  HintY = RowY + 2 * RowH + 20;
+  SfbGfxDrawCentered (L"Vol Up/Down: move   Power: select", W, HintY,
+                      SFB_COLOR_ACCENT_D, SFB_COLOR_PANEL);
+
+  /* Operation log pinned to the bottom of the window; clip to what fits. */
+  LogBottom = PanelTop + PanelH - 16;
+  LogAreaTop = HintY + SFB_FONT_CELL_H + 12;
+  if (LogAreaTop >= LogBottom) {
+    VisibleLogs = 0;
+  } else {
+    VisibleLogs = (UINT32)LogCount;
+    if (VisibleLogs > SFB_FB_MAX_LOG_VISIBLE) {
+      VisibleLogs = SFB_FB_MAX_LOG_VISIBLE;
+    }
+    if (VisibleLogs > (LogBottom - LogAreaTop) / SFB_FONT_CELL_H) {
+      VisibleLogs = (LogBottom - LogAreaTop) / SFB_FONT_CELL_H;
+    }
+  }
+
+  LogY = LogBottom - VisibleLogs * SFB_FONT_CELL_H;
+  for (Index = 0; Index < VisibleLogs; Index++) {
+    SfbGfxDrawCentered (LogLines[LogCount - VisibleLogs + Index], W, LogY,
+                        SFB_COLOR_ACCENT_D, SFB_COLOR_PANEL);
+    LogY += SFB_FONT_CELL_H;
+  }
+}
+
+VOID
+SfbFastbootRegisterUi (VOID)
+{
+  if (SfbGfxActive ()) {
+    FastbootSetScreenHooks (SfbFastbootDrawScreen);
+  }
+}
+
+/*
  * Clear the menu away and announce the launch. The loaded image prints nothing
  * of its own until it takes over, so without this the boot menu would linger on
  * screen through the load.
+ *
+ * The prompt itself stays plain English ("Booting <name>") in the large
+ * embedded font on a graphical display, or the firmware's SimpleFont on the
+ * text console; no panel is wrapped around it, and SfbBootLog appends
+ * progress lines underneath.
  */
+/* Lines of boot progress drawn under the prompt; reset per launch. */
+STATIC UINTN  gSfbBootLogCount = 0;
+
 VOID
 SfbShowBootingScreen (IN CONST CHAR16 *Name, IN BOOLEAN ClearScreen)
 {
@@ -779,6 +911,8 @@ SfbShowBootingScreen (IN CONST CHAR16 *Name, IN BOOLEAN ClearScreen)
   SFB_SETTINGS S;
 
   SfbSettingsGet (&S);
+  gSfbBootLogCount = 0;
+
   if (!S.ShowBooting) {
     /* The "Booting" banner is switched off: clear a menu-driven screen so the
      * next image starts on a clean display, and leave an unattended boot's
@@ -794,41 +928,93 @@ SfbShowBootingScreen (IN CONST CHAR16 *Name, IN BOOLEAN ClearScreen)
     return;
   }
 
-  UnicodeSPrint (Text, sizeof (Text), SfbStr (StrBooting),
+  /* Always English: the boot prompt is not part of the translated UI. */
+  UnicodeSPrint (Text, sizeof (Text), L"Booting %s",
                  (Name != NULL && Name[0] != L'\0') ? Name : L"...");
 
-  /*
-   * An unattended default boot must not blank whatever is already on screen
-   * (typically the boot splash): only clear when the launch came from the menu,
-   * where the menu itself is what needs clearing away.  When the screen stays,
-   * the banner is centred in place instead of being wrapped in a panel.
-   */
-  if (ClearScreen) {
-    SfbShowBanner (Text, NULL);
-  } else {
-    if (SfbGfxActive ()) {
-      UINT32  W;
-      UINT32  H;
+  if (SfbGfxActive ()) {
+    UINT32  W;
+    UINT32  H;
+    UINT32  Y;
 
-      SfbGfxGetScreen (&W, &H);
-      SfbGfxDrawCentered (Text, W, H / 2 - SFB_FONT_CELL_H / 2,
-                          SFB_COLOR_ACCENT, SFB_COLOR_BG);
-    } else {
-      UINTN  Cols;
-      UINTN  Rows;
-      UINTN  Col;
-      UINTN  Row;
-
-      gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_TITLE);
-      gST->ConOut->EnableCursor (gST->ConOut, FALSE);
-      SfbScreenSize (&Cols, &Rows);
-      Col = (StrLen (Text) >= Cols) ? 0 : (Cols - StrLen (Text)) / 2;
-      Row = Rows / 2;
-      gST->ConOut->SetCursorPosition (gST->ConOut, Col, Row);
-      Print (L"%s", Text);
-      gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
+    SfbGfxGetScreen (&W, &H);
+    if (ClearScreen) {
+      SfbGfxClear (SFB_COLOR_BG);
     }
+    /* Prompt above the middle so the progress log fits underneath. */
+    Y = (H >= 5 * SFB_FONT_CELL_H) ? H / 2 - 2 * SFB_FONT_CELL_H : 0;
+    SfbGfxDrawCentered (Text, W, Y, SFB_COLOR_ACCENT, SFB_COLOR_BG);
+  } else {
+    UINTN  Cols;
+    UINTN  Rows;
+    UINTN  Col;
+    UINTN  Row;
+
+    gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_TITLE);
+    gST->ConOut->EnableCursor (gST->ConOut, FALSE);
+    if (ClearScreen) {
+      gST->ConOut->ClearScreen (gST->ConOut);
+    }
+    SfbScreenSize (&Cols, &Rows);
+    Col = (StrLen (Text) >= Cols) ? 0 : (Cols - StrLen (Text)) / 2;
+    Row = (Rows >= 5) ? Rows / 2 - 2 : 0;
+    gST->ConOut->SetCursorPosition (gST->ConOut, Col, Row);
+    Print (L"%s", Text);
+    gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
   }
+}
+
+/*
+ * Append one line of boot progress under the "Booting" prompt.  Drawn with the
+ * same renderer as the prompt (large embedded font on GOP, SimpleFont on the
+ * text console); up to four lines are kept.  Honors the "Show Booting screen"
+ * setting, so turning the prompt off also silences the log.
+ */
+#define SFB_BOOT_LOG_MAX  4
+
+VOID
+SfbBootLog (IN CONST CHAR16 *Text)
+{
+  SFB_SETTINGS  S;
+
+  if (Text == NULL) {
+    return;
+  }
+
+  SfbSettingsGet (&S);
+  if (!S.ShowBooting) {
+    return;
+  }
+
+  if (gSfbBootLogCount >= SFB_BOOT_LOG_MAX) {
+    return;
+  }
+
+  if (SfbGfxActive ()) {
+    UINT32  W;
+    UINT32  H;
+    UINT32  Y;
+
+    SfbGfxGetScreen (&W, &H);
+    Y = H / 2 + SFB_FONT_CELL_H / 2 + 8 +
+        (UINT32)gSfbBootLogCount * SFB_FONT_CELL_H;
+    SfbGfxDrawCentered (Text, W, Y, SFB_COLOR_TEXT, SFB_COLOR_BG);
+  } else {
+    UINTN  Cols;
+    UINTN  Rows;
+    UINTN  Col;
+    UINTN  Row;
+
+    SfbScreenSize (&Cols, &Rows);
+    Col = (StrLen (Text) >= Cols) ? 0 : (Cols - StrLen (Text)) / 2;
+    Row = (Rows >= 5) ? Rows / 2 + 1 + gSfbBootLogCount : 0;
+    gST->ConOut->SetCursorPosition (gST->ConOut, Col, Row);
+    gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_FOOTER);
+    Print (L"%s", Text);
+    gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
+  }
+
+  gSfbBootLogCount++;
 }
 
 /* ---- PIN and settings ---------------------------------------------------- */

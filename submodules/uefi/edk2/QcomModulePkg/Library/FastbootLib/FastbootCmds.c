@@ -2506,6 +2506,12 @@ AcceptCmd (IN UINT64 Size, IN CHAR8 *Data)
   Data[Size] = '\0';
 
   DEBUG ((EFI_D_INFO, "Handling Cmd: %a\n", Data));
+  {
+    CHAR16  CmdLog[FASTBOOT_LOG_CHARS];
+
+    AsciiStrToUnicodeStrS (Data, CmdLog, FASTBOOT_LOG_CHARS);
+    FastbootScreenLog (CmdLog);
+  }
 
   if (!IsDisableParallelDownloadFlash ()) {
     /* Wait for flash finished before next command */
