@@ -20,8 +20,6 @@
 #include <Library/UefiLib.h>
 #include <Protocol/SimpleTextIn.h>
 
-#include <FastbootLib/FastbootMain.h>
-
 #include "SuperFbGfx.h"
 #include "SuperFbLang.h"
 #include "SuperFbSettings.h"
@@ -779,21 +777,52 @@ SfbReportStatus (IN CONST CHAR16 *What, IN EFI_STATUS Status)
 /*
  * Pretentious Mode replaces the transient loading screens (booting prompt,
  * entering boot menu, entering fastboot) with a wall of hundreds of related
- * but meaningless log lines, printed as plain text from the physical top-left
- * of the display with no decoration.  On GOP the text is drawn straight onto
- * the frame buffer - the firmware's SimpleFont console centres its output, so
- * it can never start at the physical top-left - and without GOP it falls back
- * to the text console.
+ * but meaningless log lines, printed as plain SimpleFont text on the text
+ * console with no decoration.  The lines vary between subsystem messages,
+ * statuses and TUI-style progress bars so the dump does not repeat itself.
  */
 #define SFB_PRETENTIOUS_LINES    512
-#define SFB_PRETENTIOUS_VISIBLE  48
 #define SFB_PRETENTIOUS_DELAY_MS 2
 
-STATIC CONST CHAR16  *mSfbPretentiousFmt[4] = {
-  L"[%03u] calibrating boot enlightenment ... OK",
-  L"[%03u] inflating loader pretentiousness ... OK",
-  L"[%03u] consulting ancient boot scriptures ... OK",
-  L"[%03u] polishing cosmic boot aura ... OK",
+STATIC CONST CHAR16  *mSfbPretentiousModule[10] = {
+  L"bootloader.core",
+  L"slim.virtio",
+  L"kernel.hyp",
+  L"abl.philosophy",
+  L"fastboot.muse",
+  L"memory.aura",
+  L"display.zen",
+  L"storage.karma",
+  L"power.nirvana",
+  L"binder.eternity",
+};
+
+STATIC CONST CHAR16  *mSfbPretentiousAction[16] = {
+  L"probing display link",
+  L"tuning cosmic resonance",
+  L"inflating subsystem ego",
+  L"consulting ancient scriptures",
+  L"polishing boot aura",
+  L"recalibrating enlightenment",
+  L"harmonising device karma",
+  L"mapping forbidden addresses",
+  L"attuning power rails",
+  L"negotiating with the boot gods",
+  L"compressing existential dread",
+  L"hydrating the kernel cache",
+  L"enlightening the display pipeline",
+  L"rehearsing the boot ritual",
+  L"defragmenting the universe",
+  L"charging the soul battery",
+};
+
+STATIC CONST CHAR16  *mSfbPretentiousStatus[6] = {
+  L"[ OK ]",
+  L"[ OK ]",
+  L"[ OK ]",
+  L"[ OK ]",
+  L"[WARN]",
+  L"[SKIP]",
 };
 
 STATIC
@@ -802,65 +831,40 @@ SfbDumpPretentiousLog (VOID)
 {
   UINTN  Index;
 
-  if (SfbGfxActive ()) {
-    CHAR16  Ring[SFB_PRETENTIOUS_VISIBLE][SFB_DESC_CHARS + 16];
-    UINTN   RingCount = 0;
-    UINTN   RingNext = 0;
-    UINTN   RowIndex;
-    UINTN   ShowRows;
-    UINT32  RowH = SFB_FONT_CELL_H + 4;
-    UINT32  MaxRows;
-    UINT32  W;
-    UINT32  H;
+  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
+  gST->ConOut->ClearScreen (gST->ConOut);
+  gST->ConOut->EnableCursor (gST->ConOut, FALSE);
 
-    SfbGfxGetScreen (&W, &H);
-    MaxRows = H / RowH;
-    if (MaxRows == 0) {
-      MaxRows = 1;
-    }
-    if (MaxRows > SFB_PRETENTIOUS_VISIBLE) {
-      MaxRows = SFB_PRETENTIOUS_VISIBLE;
-    }
-    SfbGfxClear (SFB_COLOR_BG);
+  for (Index = 0; Index < SFB_PRETENTIOUS_LINES; Index++) {
+    UINTN   Mod  = (Index * 7 + 3) % ARRAY_SIZE (mSfbPretentiousModule);
+    UINTN   Act  = (Index * 5 + 1) % ARRAY_SIZE (mSfbPretentiousAction);
+    UINTN   St   = (Index * 3 + 2) % ARRAY_SIZE (mSfbPretentiousStatus);
+    UINT32  Sec  = (UINT32)(Index / 100);
+    UINT32  Msec = (UINT32)((Index % 100) * 10);
+    UINT32  Pct  = (UINT32)((Index * 100) / SFB_PRETENTIOUS_LINES);
 
-    for (Index = 0; Index < SFB_PRETENTIOUS_LINES; Index++) {
-      CHAR16  Line[SFB_DESC_CHARS + 16];
+    if ((Index % 7) == 6) {
+      /* TUI-style progress bar line. */
+      CHAR16  Bar[14];
+      UINTN   Filled = (Pct * 10) / 100;
+      UINTN   Bi;
 
-      UnicodeSPrint (
-        Line, sizeof (Line),
-        mSfbPretentiousFmt[Index % ARRAY_SIZE (mSfbPretentiousFmt)],
-        (UINT32)Index);
-      StrnCpyS (Ring[RingNext], SFB_DESC_CHARS + 16, Line,
-                SFB_DESC_CHARS + 15);
-      RingNext = (RingNext + 1) % SFB_PRETENTIOUS_VISIBLE;
-      if (RingCount < SFB_PRETENTIOUS_VISIBLE) {
-        RingCount++;
+      Bar[0] = L'[';
+      for (Bi = 0; Bi < 10; Bi++) {
+        Bar[1 + Bi] = (Bi < Filled) ? L'#' : L'-';
       }
+      Bar[11] = L']';
+      Bar[12] = L'\0';
 
-      /* Scroll the visible block: lines stack from the top until the screen
-       * is full, then the oldest line leaves on every new one. */
-      ShowRows = (RingCount < MaxRows) ? RingCount : MaxRows;
-      SfbGfxClear (SFB_COLOR_BG);
-      for (RowIndex = 0; RowIndex < ShowRows; RowIndex++) {
-        UINTN  Src = (RingNext + SFB_PRETENTIOUS_VISIBLE - ShowRows
-                      + RowIndex) % SFB_PRETENTIOUS_VISIBLE;
-
-        SfbGfxDrawText (Ring[Src], 0, (UINT32)RowIndex * RowH,
-                        SFB_COLOR_TEXT, SFB_COLOR_BG);
-      }
-      gBS->Stall (SFB_PRETENTIOUS_DELAY_MS * 1000);
+      Print (L"[%04u.%03u] %s: %s %s %3u%%\r\n",
+             Sec, Msec, mSfbPretentiousModule[Mod], Bar,
+             mSfbPretentiousAction[Act], Pct);
+    } else {
+      Print (L"[%04u.%03u] %s: %s ... %s\r\n",
+             Sec, Msec, mSfbPretentiousModule[Mod],
+             mSfbPretentiousAction[Act], mSfbPretentiousStatus[St]);
     }
-  } else {
-    gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
-    gST->ConOut->ClearScreen (gST->ConOut);
-    gST->ConOut->EnableCursor (gST->ConOut, FALSE);
-
-    for (Index = 0; Index < SFB_PRETENTIOUS_LINES; Index++) {
-      Print (mSfbPretentiousFmt[Index % ARRAY_SIZE (mSfbPretentiousFmt)],
-             (UINT32)Index);
-      Print (L"\r\n");
-      gBS->Stall (SFB_PRETENTIOUS_DELAY_MS * 1000);
-    }
+    gBS->Stall (SFB_PRETENTIOUS_DELAY_MS * 1000);
   }
 }
 
@@ -868,9 +872,9 @@ SfbDumpPretentiousLog (VOID)
  * Hand the screen over to fastboot. The menu is the last thing that draws
  * before control leaves for the fastboot loop, which prints nothing of its own
  * until a host connects, so without this the user would be staring at a boot
- * menu that no longer responds to anything.  Plain text, left aligned,
- * matching the fastboot mode screen the library draws next.  In Pretentious
- * Mode this becomes the meaningless-log dump.
+ * menu that no longer responds to anything.  Plain SimpleFont text, matching
+ * the fastboot mode screen the library draws next.  In Pretentious Mode this
+ * becomes the meaningless-log dump.
  */
 VOID
 SfbShowFastbootMode (VOID)
@@ -883,73 +887,12 @@ SfbShowFastbootMode (VOID)
     return;
   }
 
-  if (SfbGfxActive ()) {
-    /* Same plain top-left layout the fastboot library screen uses. */
-    SfbGfxClear (SFB_COLOR_BG);
-    SfbGfxDrawText (L"FASTBOOT MODE", 0, 0, SFB_COLOR_TEXT, SFB_COLOR_BG);
-    SfbGfxDrawText (L"Connect a host and run fastboot commands.", 0,
-                    SFB_FONT_CELL_H, SFB_COLOR_TEXT, SFB_COLOR_BG);
-  } else {
-    gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_TITLE);
-    gST->ConOut->ClearScreen (gST->ConOut);
-    gST->ConOut->EnableCursor (gST->ConOut, FALSE);
-    Print (L"FASTBOOT MODE\r\n\r\n");
-    Print (L"Connect a host and run fastboot commands.\r\n");
-    gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
-  }
-}
-
-/*
- * Fastboot mode screen drawn straight onto the frame buffer: the firmware
- * text console centres its output on the display, so this renderer puts the
- * screen at the physical top-left.  Plain text only - no panel, no border -
- * with the operation log pinned to the bottom of the display.
- */
-STATIC
-VOID
-SfbFastbootDrawScreen (IN UINTN Cursor,
-                       IN UINTN LogCount,
-                       IN CONST CHAR16 **LogLines)
-{
-  UINT32  W;
-  UINT32  H;
-  UINT32  RowH;
-  UINT32  HeaderRows = 4;
-  UINT32  MaxLogRows;
-  UINT32  ShowRows;
-  UINTN   Index;
-
-  SfbGfxGetScreen (&W, &H);
-  SfbGfxClear (SFB_COLOR_BG);
-
-  /* Header, plain text from the top-left. */
-  SfbGfxDrawText (L"FASTBOOT MODE", 0, 0, SFB_COLOR_TEXT, SFB_COLOR_BG);
-  SfbGfxDrawText ((Cursor == 0) ? L"> Power Off" : L"  Power Off", 0,
-                  SFB_FONT_CELL_H, SFB_COLOR_TEXT, SFB_COLOR_BG);
-  SfbGfxDrawText ((Cursor == 1) ? L"> Restart" : L"  Restart", 0,
-                  2 * SFB_FONT_CELL_H, SFB_COLOR_TEXT, SFB_COLOR_BG);
-  SfbGfxDrawText (L"Vol Up/Down: move   Power: select", 0,
-                  3 * SFB_FONT_CELL_H, SFB_COLOR_TEXT, SFB_COLOR_BG);
-
-  /* Operation log: everything below the header, newest line at the very
-   * bottom of the display, left-aligned. */
-  RowH = SFB_FONT_CELL_H + 4;
-  MaxLogRows = (H >= (HeaderRows + 1) * RowH) ? (H / RowH) - HeaderRows : 1;
-  ShowRows = (LogCount < MaxLogRows) ? (UINT32)LogCount : MaxLogRows;
-  for (Index = 0; Index < ShowRows; Index++) {
-    UINT32  Y = (HeaderRows + MaxLogRows - ShowRows + (UINT32)Index) * RowH;
-
-    SfbGfxDrawText (LogLines[LogCount - ShowRows + Index], 0, Y,
-                    SFB_COLOR_TEXT, SFB_COLOR_BG);
-  }
-}
-
-VOID
-SfbFastbootRegisterUi (VOID)
-{
-  if (SfbGfxActive ()) {
-    FastbootSetScreenHooks (SfbFastbootDrawScreen);
-  }
+  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_TITLE);
+  gST->ConOut->ClearScreen (gST->ConOut);
+  gST->ConOut->EnableCursor (gST->ConOut, FALSE);
+  Print (L"FASTBOOT MODE\r\n\r\n");
+  Print (L"Connect a host and run fastboot commands.\r\n");
+  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
 }
 
 /*
@@ -958,9 +901,8 @@ SfbFastbootRegisterUi (VOID)
  * screen through the load.
  *
  * The prompt itself stays plain English ("Booting <name>") in the firmware's
- * SimpleFont, starting at the top-left corner of the console.  No panel or
- * decoration is drawn around it; SfbBootLog appends every task log line
- * underneath, also from the left edge, one line per row.
+ * SimpleFont.  No panel or decoration is drawn around it; SfbBootLog appends
+ * every task log line underneath, one line per row.
  */
 /* Lines of boot progress drawn under the prompt; reset per launch. */
 STATIC UINTN  gSfbBootLogCount = 0;
@@ -998,15 +940,7 @@ SfbShowBootingScreen (IN CONST CHAR16 *Name, IN BOOLEAN ClearScreen)
   UnicodeSPrint (Text, sizeof (Text), L"Booting %s",
                  (Name != NULL && Name[0] != L'\0') ? Name : L"...");
 
-  if (SfbGfxActive ()) {
-    /* Draw straight onto the frame buffer: the firmware text console centres
-     * its output, so this is the only way to start at the physical top-left.
-     * Plain text, no decoration; the boot log is printed underneath. */
-    if (ClearScreen) {
-      SfbGfxClear (SFB_COLOR_BG);
-    }
-    SfbGfxDrawText (Text, 0, 0, SFB_COLOR_TEXT, SFB_COLOR_BG);
-  } else {
+  {
     UINTN  Cols;
     UINTN  Rows;
 
@@ -1015,7 +949,7 @@ SfbShowBootingScreen (IN CONST CHAR16 *Name, IN BOOLEAN ClearScreen)
     if (ClearScreen) {
       gST->ConOut->ClearScreen (gST->ConOut);
     }
-    /* SimpleFont console fallback; the log is printed underneath. */
+    /* SimpleFont; the boot log is printed underneath. */
     SfbScreenSize (&Cols, &Rows);
     gST->ConOut->SetCursorPosition (gST->ConOut, 0, 0);
     Print (L"%s", Text);
@@ -1025,9 +959,8 @@ SfbShowBootingScreen (IN CONST CHAR16 *Name, IN BOOLEAN ClearScreen)
 
 /*
  * Append one line of boot progress under the "Booting" prompt, plain
- * text from the left edge - embedded font on the frame buffer, SimpleFont
- * console fallback - one line per row from row 1 down.  Every task log line
- * is printed until the screen runs out of rows.  Honors the "Show Booting
+ * SimpleFont text, one line per row from row 1 down.  Every task log line is
+ * printed until the console runs out of rows.  Honors the "Show Booting
  * screen" setting, so turning the prompt off also silences the log;
  * Pretentious Mode replaces the prompt with its own dump.
  */
@@ -1045,18 +978,7 @@ SfbBootLog (IN CONST CHAR16 *Text)
     return;
   }
 
-  if (SfbGfxActive ()) {
-    UINT32  W;
-    UINT32  H;
-
-    SfbGfxGetScreen (&W, &H);
-    if ((UINT32)gSfbBootLogCount + 1 >= H / SFB_FONT_CELL_H) {
-      return;
-    }
-    SfbGfxDrawText (Text, 0,
-                    SFB_FONT_CELL_H * (1 + (UINT32)gSfbBootLogCount),
-                    SFB_COLOR_TEXT, SFB_COLOR_BG);
-  } else {
+  {
     UINTN  Cols;
     UINTN  Rows;
     UINTN  Row;

@@ -75,21 +75,4 @@ EFI_STATUS FastbootInitialize (VOID);
 VOID
 FastbootScreenLog (IN CONST CHAR16 *Text);
 
-/*
- * Optional fastboot screen renderer installed by the hosting application via
- * FastbootSetScreenHooks.  The platform's text console centres its output on
- * the display, so the hosting app installs a renderer that draws directly to
- * the frame buffer to put the screen at the physical top-left.  Cursor is the
- * highlighted action row; LogCount and LogLines carry the newest log lines
- * (LogLines[0] is the oldest of the shown set).
- */
-typedef VOID (*FASTBOOT_SCREEN_DRAW) (IN UINTN Cursor,
-                                      IN UINTN LogCount,
-                                      IN CONST CHAR16 **LogLines);
-
-/* Replace the on-device fastboot screen renderer; pass NULL to use the
- * built-in text-console screen. */
-EFI_STATUS
-FastbootSetScreenHooks (IN FASTBOOT_SCREEN_DRAW Draw OPTIONAL);
-
 #endif
