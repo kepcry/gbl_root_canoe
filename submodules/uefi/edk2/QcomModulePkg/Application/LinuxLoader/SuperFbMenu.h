@@ -365,6 +365,25 @@ SfbShowBootingScreen (IN CONST CHAR16 *Name, IN BOOLEAN ClearScreen);
 VOID
 SfbBootLog (IN CONST CHAR16 *Text);
 
+/* ---- Pretentious Mode log stream --------------------------------------- */
+
+/* Lines emitted per call to SfbPretentiousEmit. */
+#define SFB_PRETENTIOUS_BATCH  16
+
+/*
+ * Start the Pretentious Mode log stream over.  Until SfbPretentiousBegin is
+ * called again, SfbPretentiousEmit prints the next batch of short, coloured
+ * (OK green / WARN yellow / SKIP cyan), meaningless lines on the text
+ * console without clearing the screen, and returns TRUE while lines remain.
+ * The boot path interleaves these batches with the real loading steps so the
+ * launch is never delayed by the log output.
+ */
+VOID
+SfbPretentiousBegin (VOID);
+
+BOOLEAN
+SfbPretentiousEmit (IN UINTN Count);
+
 /* Wait for a key. TimeoutMs of 0 waits indefinitely. */
 SFB_KEY
 SfbWaitForKey (IN UINT32 TimeoutMs);

@@ -1082,6 +1082,9 @@ SfbLaunchEntry (IN CONST SFB_BOOT_ENTRY *Entry,
     SfbBootLog (L"Saving default entry");
     SfbSaveDefaultEntry (Entry);
   }
+  /* Pretentious Mode: keep the log stream running while the launch proceeds;
+   * the batches below are no-ops when the mode is off. */
+  SfbPretentiousEmit (SFB_PRETENTIOUS_BATCH);
 
   /*
    * Preload any drivers the entry asks for via a DRIVER.LIST in its directory,
@@ -1089,10 +1092,12 @@ SfbLaunchEntry (IN CONST SFB_BOOT_ENTRY *Entry,
    * it already bound before it starts.
    */
   SfbPreloadDrivers (Entry->Volume, Entry->Path);
+  SfbPretentiousEmit (SFB_PRETENTIOUS_BATCH);
 
   SfbBypassSecurity();
   Status = gBS->LoadImage (FALSE, gImageHandle, Entry->DevicePath,
                            NULL, 0, &ImageHandle);
+  SfbPretentiousEmit (SFB_PRETENTIOUS_BATCH);
 
   if (EFI_ERROR (Status)) {
     DEBUG ((EFI_D_ERROR, "SFB: LoadImage '%s' failed: %r\n",
@@ -1102,6 +1107,7 @@ SfbLaunchEntry (IN CONST SFB_BOOT_ENTRY *Entry,
   }
 
   SfbBootLog (L"Starting image...");
+  SfbPretentiousEmit (SFB_PRETENTIOUS_BATCH);
   Status = gBS->StartImage (ImageHandle, &ExitDataSize, &ExitData);
   DEBUG ((EFI_D_INFO, "SFB: '%s' returned: %r\n", Entry->Path, Status));
   {

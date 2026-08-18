@@ -780,70 +780,79 @@ SfbReportStatus (IN CONST CHAR16 *What, IN EFI_STATUS Status)
  * but meaningless log lines, printed as plain SimpleFont text on the text
  * console with no decoration.  The lines vary between subsystem messages,
  * statuses and TUI-style progress bars so the dump does not repeat itself.
+ * Statuses are coloured ([ OK ] green, [WARN] yellow, [SKIP] cyan) and the
+ * screen is never cleared, so the background stays untouched.  The text is
+ * kept short and there is no per-line delay, so the console fills with as
+ * many lines as it can hold.  In the boot path the stream is interleaved
+ * with the real loading steps: printing never delays the launch and the
+ * image is started as soon as loading completes.
  */
-#define SFB_PRETENTIOUS_LINES    512
+#define SFB_PRETENTIOUS_LINES    160
 #define SFB_PRETENTIOUS_DELAY_MS 2
 
+#define SFB_ATTR_LOG_NORMAL  EFI_TEXT_ATTR (EFI_LIGHTGRAY, EFI_BLACK)
+
+typedef struct {
+  CONST CHAR16  *Text;
+  UINTN         Attr;
+} SFB_PRETENTIOUS_STATUS;
+
 STATIC CONST CHAR16  *mSfbPretentiousModule[10] = {
-  L"bootloader.core",
-  L"slim.virtio",
-  L"kernel.hyp",
-  L"abl.philosophy",
-  L"fastboot.muse",
-  L"memory.aura",
-  L"display.zen",
-  L"storage.karma",
-  L"power.nirvana",
-  L"binder.eternity",
+  L"boot", L"slim", L"hyp", L"abl", L"fastboot",
+  L"mem",  L"disp", L"stor", L"pwr", L"bndr",
 };
 
 STATIC CONST CHAR16  *mSfbPretentiousAction[16] = {
-  L"probing display link",
-  L"tuning cosmic resonance",
-  L"inflating subsystem ego",
-  L"consulting ancient scriptures",
-  L"polishing boot aura",
-  L"recalibrating enlightenment",
-  L"harmonising device karma",
-  L"mapping forbidden addresses",
-  L"attuning power rails",
-  L"negotiating with the boot gods",
-  L"compressing existential dread",
-  L"hydrating the kernel cache",
-  L"enlightening the display pipeline",
-  L"rehearsing the boot ritual",
-  L"defragmenting the universe",
-  L"charging the soul battery",
+  L"probe display", L"tune resonance", L"inflate ego",  L"read scripture",
+  L"polish aura",   L"recalibrate",    L"harmonise",    L"map addrs",
+  L"tune rails",    L"ask boot gods",  L"pack dread",   L"fill cache",
+  L"light pipe",    L"rehearse",       L"defrag",       L"charge soul",
 };
 
-STATIC CONST CHAR16  *mSfbPretentiousStatus[6] = {
-  L"[ OK ]",
-  L"[ OK ]",
-  L"[ OK ]",
-  L"[ OK ]",
-  L"[WARN]",
-  L"[SKIP]",
+STATIC CONST SFB_PRETENTIOUS_STATUS  mSfbPretentiousStatus[5] = {
+  { L"[ OK ]",  EFI_TEXT_ATTR (EFI_GREEN, EFI_BLACK) },
+  { L"[ OK ]",  EFI_TEXT_ATTR (EFI_GREEN, EFI_BLACK) },
+  { L"[ OK ]",  EFI_TEXT_ATTR (EFI_GREEN, EFI_BLACK) },
+  { L"[WARN]",  EFI_TEXT_ATTR (EFI_YELLOW, EFI_BLACK) },
+  { L"[SKIP]",  EFI_TEXT_ATTR (EFI_LIGHTCYAN, EFI_BLACK) },
 };
 
-STATIC
+STATIC BOOLEAN  gSfbPretentiousActive = FALSE;
+STATIC UINTN    gSfbPretentiousIndex = 0;
+
 VOID
-SfbDumpPretentiousLog (VOID)
+SfbPretentiousBegin (VOID)
+{
+  gSfbPretentiousActive = TRUE;
+  gSfbPretentiousIndex = 0;
+}
+
+BOOLEAN
+SfbPretentiousEmit (IN UINTN Count)
 {
   UINTN  Index;
 
-  gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_NORMAL);
-  gST->ConOut->ClearScreen (gST->ConOut);
-  gST->ConOut->EnableCursor (gST->ConOut, FALSE);
+  if (!gSfbPretentiousActive) {
+    return FALSE;
+  }
 
-  for (Index = 0; Index < SFB_PRETENTIOUS_LINES; Index++) {
-    UINTN   Mod  = (Index * 7 + 3) % ARRAY_SIZE (mSfbPretentiousModule);
-    UINTN   Act  = (Index * 5 + 1) % ARRAY_SIZE (mSfbPretentiousAction);
-    UINTN   St   = (Index * 3 + 2) % ARRAY_SIZE (mSfbPretentiousStatus);
-    UINT32  Sec  = (UINT32)(Index / 100);
-    UINT32  Msec = (UINT32)((Index % 100) * 10);
-    UINT32  Pct  = (UINT32)((Index * 100) / SFB_PRETENTIOUS_LINES);
+  for (Index = 0;
+       Index < Count && gSfbPretentiousIndex < SFB_PRETENTIOUS_LINES;
+       Index++, gSfbPretentiousIndex++) {
+    UINTN   Mod  = (gSfbPretentiousIndex * 7 + 3) %
+                   ARRAY_SIZE (mSfbPretentiousModule);
+    UINTN   Act  = (gSfbPretentiousIndex * 5 + 1) %
+                   ARRAY_SIZE (mSfbPretentiousAction);
+    UINTN   St   = (gSfbPretentiousIndex * 3 + 2) %
+                   ARRAY_SIZE (mSfbPretentiousStatus);
+    UINT32  Sec  = (UINT32)(gSfbPretentiousIndex / 100);
+    UINT32  Msec = (UINT32)((gSfbPretentiousIndex % 100) * 10);
+    UINT32  Pct  = (UINT32)((gSfbPretentiousIndex * 100) /
+                            SFB_PRETENTIOUS_LINES);
 
-    if ((Index % 7) == 6) {
+    gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_LOG_NORMAL);
+
+    if ((gSfbPretentiousIndex % 7) == 6) {
       /* TUI-style progress bar line. */
       CHAR16  Bar[14];
       UINTN   Filled = (Pct * 10) / 100;
@@ -856,16 +865,19 @@ SfbDumpPretentiousLog (VOID)
       Bar[11] = L']';
       Bar[12] = L'\0';
 
-      Print (L"[%04u.%03u] %s: %s %s %3u%%\r\n",
-             Sec, Msec, mSfbPretentiousModule[Mod], Bar,
-             mSfbPretentiousAction[Act], Pct);
+      Print (L"[%04u.%03u] %s: %s %3u%%\r\n",
+             Sec, Msec, mSfbPretentiousModule[Mod], Bar, Pct);
     } else {
-      Print (L"[%04u.%03u] %s: %s ... %s\r\n",
+      Print (L"[%04u.%03u] %s: %s ... ",
              Sec, Msec, mSfbPretentiousModule[Mod],
-             mSfbPretentiousAction[Act], mSfbPretentiousStatus[St]);
+             mSfbPretentiousAction[Act]);
+      gST->ConOut->SetAttribute (gST->ConOut, mSfbPretentiousStatus[St].Attr);
+      Print (L"%s\r\n", mSfbPretentiousStatus[St].Text);
+      gST->ConOut->SetAttribute (gST->ConOut, SFB_ATTR_LOG_NORMAL);
     }
-    gBS->Stall (SFB_PRETENTIOUS_DELAY_MS * 1000);
   }
+
+  return (BOOLEAN)(gSfbPretentiousIndex < SFB_PRETENTIOUS_LINES);
 }
 
 /*
@@ -883,7 +895,10 @@ SfbShowFastbootMode (VOID)
 
   SfbSettingsGet (&S);
   if (S.Pretentious) {
-    SfbDumpPretentiousLog ();
+    SfbPretentiousBegin ();
+    while (SfbPretentiousEmit (SFB_PRETENTIOUS_BATCH)) {
+      gBS->Stall (SFB_PRETENTIOUS_DELAY_MS * 1000);
+    }
     return;
   }
 
@@ -932,7 +947,8 @@ SfbShowBootingScreen (IN CONST CHAR16 *Name, IN BOOLEAN ClearScreen)
   }
 
   if (S.Pretentious) {
-    SfbDumpPretentiousLog ();
+    SfbPretentiousBegin ();
+    SfbPretentiousEmit (SFB_PRETENTIOUS_BATCH);
     return;
   }
 
@@ -1332,7 +1348,10 @@ SfbShowEnteringMenu (VOID)
 
   SfbSettingsGet (&S);
   if (S.Pretentious) {
-    SfbDumpPretentiousLog ();
+    SfbPretentiousBegin ();
+    while (SfbPretentiousEmit (SFB_PRETENTIOUS_BATCH)) {
+      gBS->Stall (SFB_PRETENTIOUS_DELAY_MS * 1000);
+    }
   } else {
     SfbShowBanner (SfbStr (StrEnteringBootMenu), SfbStr (StrKeyNavSelect));
   }
