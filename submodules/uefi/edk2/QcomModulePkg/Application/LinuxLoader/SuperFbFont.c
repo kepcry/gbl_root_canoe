@@ -36,8 +36,8 @@ SfbFontGetGlyph (IN CHAR16 Ch,
 BOOLEAN
 SfbArtGetGlyph (IN CHAR16 Ch,
                 OUT UINT32 *Offset,
-                OUT UINT8  *Width,
-                OUT UINT8  *Advance)
+                OUT UINT16 *Width,
+                OUT UINT16 *Advance)
 {
   UINTN  Index;
 

@@ -12299,7 +12299,7 @@ CONST UINT8 gSfbArtBitmap[] = {
 
 CONST UINTN gSfbArtGlyphCount = 6;
 
-CONST SFB_FONT_GLYPH gSfbArtGlyphs[] = {
+CONST SFB_ART_GLYPH gSfbArtGlyphs[] = {
   { 0x8C6A, 0, 256, 256 },
   { 0x60C5, 32768, 256, 256 },
   { 0x5728, 65536, 256, 256 },

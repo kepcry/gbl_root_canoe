@@ -490,8 +490,8 @@ SfbGfxArtTextWidth (IN CONST CHAR16 *Text)
 
   for (Index = 0; Index < Length; Index++) {
     UINT32  Offset;
-    UINT8   GlyphWidth;
-    UINT8   Advance;
+    UINT16  GlyphWidth;
+    UINT16  Advance;
 
     if (SfbArtGetGlyph (Text[Index], &Offset, &GlyphWidth, &Advance)) {
       Width += Advance;
@@ -552,8 +552,8 @@ SfbGfxDrawArtText (IN CONST CHAR16 *Text,
   PenX = 0;
   for (Index = 0; Index < Length; Index++) {
     UINT32  Offset;
-    UINT8   GlyphWidth;
-    UINT8   GlyphAdvance;
+    UINT16  GlyphWidth;
+    UINT16  GlyphAdvance;
     UINT32  Gx;
     UINT32  Gy;
 

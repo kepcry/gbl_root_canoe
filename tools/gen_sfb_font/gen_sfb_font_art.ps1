@@ -168,7 +168,7 @@ if ($row.Count -gt 0) {
 [void]$sb.AppendLine('')
 [void]$sb.AppendLine('CONST UINTN gSfbArtGlyphCount = ' + $glyphs.Count + ';')
 [void]$sb.AppendLine('')
-[void]$sb.AppendLine('CONST SFB_FONT_GLYPH gSfbArtGlyphs[] = {')
+[void]$sb.AppendLine('CONST SFB_ART_GLYPH gSfbArtGlyphs[] = {')
 foreach ($gl in $glyphs) {
     [void]$sb.AppendLine('  ' + $gl + ',')
 }
