@@ -76,6 +76,7 @@
 	SuperFbFont.h
 	SuperFbFont.c
 	SuperFbFontData.c
+	SuperFbFontArtData.c
 	SuperFbGfx.h
 	SuperFbGfx.c
 	SuperFbSettings.h

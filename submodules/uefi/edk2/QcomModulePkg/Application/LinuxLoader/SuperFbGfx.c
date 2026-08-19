@@ -465,6 +465,150 @@ SfbGfxDrawTextScaled (IN CONST CHAR16 *Text,
   FreePool (Row);
 }
 
+/* Alpha (0..SFB_FONT_MAX_ALPHA) of one 256px art-glyph pixel. */
+STATIC
+UINTN
+SfbGfxArtGlyphAlpha (IN UINT32 Offset, IN UINTN GlyphWidth,
+                     IN UINTN X, IN UINTN Y)
+{
+  UINTN  BitIndex;
+
+  if (X >= GlyphWidth || Y >= SFB_ART_CELL_H) {
+    return 0;
+  }
+  BitIndex = Y * GlyphWidth + X;
+  return (UINTN)((gSfbArtBitmap[Offset + BitIndex / 2] >>
+                  ((BitIndex & 1) ? 0 : 4)) & 0xF);
+}
+
+UINT32
+SfbGfxArtTextWidth (IN CONST CHAR16 *Text)
+{
+  UINTN   Length = StrLen (Text);
+  UINTN   Index;
+  UINT32  Width = 0;
+
+  for (Index = 0; Index < Length; Index++) {
+    UINT32  Offset;
+    UINT8   GlyphWidth;
+    UINT8   Advance;
+
+    if (SfbArtGetGlyph (Text[Index], &Offset, &GlyphWidth, &Advance)) {
+      Width += Advance;
+    } else {
+      Width += SFB_ART_CELL_H;
+    }
+  }
+
+  return Width;
+}
+
+VOID
+SfbGfxDrawArtText (IN CONST CHAR16 *Text,
+                   IN UINT32       X,
+                   IN UINT32       Y,
+                   IN UINT32       ScaleNum,
+                   IN UINT32       ScaleDen,
+                   IN UINT32       Fg,
+                   IN UINT32       Bg)
+{
+  EFI_GRAPHICS_OUTPUT_BLT_PIXEL  *Row;
+  EFI_GRAPHICS_OUTPUT_BLT_PIXEL  FgPix;
+  EFI_GRAPHICS_OUTPUT_BLT_PIXEL  BgPix;
+  UINTN                           Length;
+  UINTN                           Index;
+  UINT32                          Cell;
+  UINT32                          RowWidth;
+  UINT32                          PenX;
+
+  if (!SfbGfxActive () || ScaleNum == 0 || ScaleDen == 0) {
+    return;
+  }
+
+  Length = StrLen (Text);
+  if (Length == 0) {
+    return;
+  }
+
+  /* One art cell scaled to ScaleNum/ScaleDen. */
+  Cell = (SFB_ART_CELL_H * ScaleNum + ScaleDen - 1) / ScaleDen;
+  if (Cell == 0 || X + Cell * (UINT32)Length > mSfbScreenW ||
+      Y + Cell > mSfbScreenH) {
+    return;
+  }
+
+  RowWidth = Cell * (UINT32)Length;
+  Row = AllocateZeroPool ((UINTN)RowWidth * Cell * sizeof (*Row));
+  if (Row == NULL) {
+    return;
+  }
+
+  SfbGfxPixel (&FgPix, Fg);
+  SfbGfxPixel (&BgPix, Bg);
+  for (Index = 0; Index < (UINTN)RowWidth * Cell; Index++) {
+    Row[Index] = BgPix;
+  }
+
+  PenX = 0;
+  for (Index = 0; Index < Length; Index++) {
+    UINT32  Offset;
+    UINT8   GlyphWidth;
+    UINT8   GlyphAdvance;
+    UINT32  Gx;
+    UINT32  Gy;
+
+    if (!SfbArtGetGlyph (Text[Index], &Offset, &GlyphWidth, &GlyphAdvance)) {
+      /* Hollow placeholder box, scaled to the displayed cell. */
+      for (Gx = 0; Gx < Cell; Gx++) {
+        Row[PenX + Gx] = FgPix;
+        Row[PenX + Gx + (Cell - 1) * RowWidth] = FgPix;
+      }
+      for (Gy = 0; Gy < Cell; Gy++) {
+        Row[PenX + Gy * RowWidth] = FgPix;
+        Row[PenX + Cell - 1 + Gy * RowWidth] = FgPix;
+      }
+      PenX += Cell;
+      continue;
+    }
+
+    /* Nearest-neighbour rational scale: crisp at integer upscales, no
+     * blurring from interpolation. */
+    for (Gy = 0; Gy < Cell; Gy++) {
+      UINTN  Sy = ((UINTN)Gy * ScaleDen) / ScaleNum;
+
+      for (Gx = 0; Gx < Cell; Gx++) {
+        UINTN  Sx = ((UINTN)Gx * ScaleDen) / ScaleNum;
+        UINTN  Alpha = SfbGfxArtGlyphAlpha (Offset, GlyphWidth, Sx, Sy);
+        UINTN  Dest = PenX + Gx + Gy * RowWidth;
+
+        if (Alpha == SFB_FONT_MAX_ALPHA) {
+          Row[Dest] = FgPix;
+        } else if (Alpha != 0) {
+          Row[Dest].Blue  = (UINT8)(((UINTN)FgPix.Blue  * Alpha +
+                                     (UINTN)BgPix.Blue  *
+                                       (SFB_FONT_MAX_ALPHA - Alpha)) /
+                                    SFB_FONT_MAX_ALPHA);
+          Row[Dest].Green = (UINT8)(((UINTN)FgPix.Green * Alpha +
+                                     (UINTN)BgPix.Green *
+                                       (SFB_FONT_MAX_ALPHA - Alpha)) /
+                                    SFB_FONT_MAX_ALPHA);
+          Row[Dest].Red   = (UINT8)(((UINTN)FgPix.Red   * Alpha +
+                                     (UINTN)BgPix.Red   *
+                                       (SFB_FONT_MAX_ALPHA - Alpha)) /
+                                    SFB_FONT_MAX_ALPHA);
+        }
+      }
+    }
+
+    PenX += Cell;
+  }
+
+  mSfbGop->Blt (mSfbGop, Row, EfiBltBufferToVideo, 0, 0, X, Y,
+                RowWidth, Cell,
+                RowWidth * sizeof (EFI_GRAPHICS_OUTPUT_BLT_PIXEL));
+  FreePool (Row);
+}
+
 VOID
 SfbGfxDrawTextTransparent (IN CONST CHAR16 *Text,
                            IN UINT32       X,

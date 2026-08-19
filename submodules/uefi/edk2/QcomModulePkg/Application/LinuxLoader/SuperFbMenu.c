@@ -872,8 +872,10 @@ SfbPretentiousBegin (VOID)
 
 /*
  * Show the chosen text centered on the screen: the embedded font glyphs are
- * scaled up directly (no block conversion), drawn on a pure-black background.
- * Art mode outputs no log lines.
+ * drawn from the high-resolution 256px art font at 1x or a small integer
+ * scale with nearest-neighbour sampling, so the characters stay sharp
+ * instead of being blurred by upscaling the 32px UI font.  Art mode outputs
+ * no log lines.
  */
 STATIC
 VOID
@@ -890,27 +892,64 @@ SfbPretentiousShowArt (IN UINTN Choice)
   UINT32        Y;
 
   if (SfbGfxActive ()) {
+    UINT32  ArtW0;
+    UINT32  Den;
+
     SfbGfxGetScreen (&W, &H);
 
-    /* Pick the largest scale that fits the screen with margins; the glyphs
-     * are bilinearly smoothed, so large scales stay crisp and even. */
-    Scale = 18;
-    while (Scale > 2) {
-      ArtW = SfbGfxTextWidth (Art) * Scale;
-      ArtH = SFB_FONT_CELL_H * Scale;
-      if (ArtW <= W - 20 && ArtH <= H - 40) {
-        break;
-      }
+    /* Width of the art text at 1x in art-cell pixels. */
+    ArtW0 = SfbGfxArtTextWidth (Art);
+
+    /* Largest integer upscale (capped at 2x) that fits; the 256px source
+     * keeps even 2x nearest-neighbour sampling crisp. */
+    Scale = 2;
+    while (Scale > 1 &&
+           (ArtW0 * Scale > W - 20 ||
+            SFB_ART_CELL_H * Scale > H - 40)) {
       Scale--;
     }
-    ArtW = SfbGfxTextWidth (Art) * Scale;
-    ArtH = SFB_FONT_CELL_H * Scale;
+    if (ArtW0 * Scale <= W - 20 && SFB_ART_CELL_H * Scale <= H - 40) {
+      ArtW = ArtW0 * Scale;
+      ArtH = SFB_ART_CELL_H * Scale;
+      X = (W >= ArtW) ? (W - ArtW) / 2 : 0;
+      Y = (H >= ArtH) ? (H - ArtH) / 2 : 0;
+
+      if (X >= 12 && Y >= 12) {
+        SfbGfxFillRect (X - 12, Y - 12, ArtW + 24, ArtH + 24,
+                        SFB_COLOR_BLACK);
+      }
+      SfbGfxDrawArtText (Art, X, Y, Scale, 1,
+                         SFB_COLOR_ACCENT, SFB_COLOR_BLACK);
+      return;
+    }
+
+    /* Small screens: fractional downscale so the art still fits. */
+    {
+      UINT32  Columns = (ArtW0 + SFB_ART_CELL_H - 1) / SFB_ART_CELL_H;
+      UINT32  MaxCellW = (Columns > 0) ? (W - 20) / Columns : (H - 40);
+      UINT32  MaxCellH = H - 40;
+      UINT32  MaxCell = (MaxCellW < MaxCellH) ? MaxCellW : MaxCellH;
+
+      if (MaxCell < 1) {
+        MaxCell = 1;
+      }
+      Den = (MaxCell >= SFB_ART_CELL_H) ? 1
+          : (SFB_ART_CELL_H + MaxCell - 1) / MaxCell;
+      if (Den > 4) {
+        Den = 4;
+      }
+    }
+    ArtW = (ArtW0 + Den - 1) / Den;
+    ArtH = (SFB_ART_CELL_H + Den - 1) / Den;
     X = (W >= ArtW) ? (W - ArtW) / 2 : 0;
     Y = (H >= ArtH) ? (H - ArtH) / 2 : 0;
 
-    /* Pure-black background behind the scaled glyphs. */
-    SfbGfxFillRect (X - 12, Y - 12, ArtW + 24, ArtH + 24, SFB_COLOR_BLACK);
-    SfbGfxDrawTextScaled (Art, X, Y, Scale, SFB_COLOR_ACCENT, SFB_COLOR_BLACK);
+    if (X >= 12 && Y >= 12) {
+      SfbGfxFillRect (X - 12, Y - 12, ArtW + 24, ArtH + 24,
+                      SFB_COLOR_BLACK);
+    }
+    SfbGfxDrawArtText (Art, X, Y, 1, Den,
+                       SFB_COLOR_ACCENT, SFB_COLOR_BLACK);
   } else {
     UINTN  Cols;
     UINTN  Rows;

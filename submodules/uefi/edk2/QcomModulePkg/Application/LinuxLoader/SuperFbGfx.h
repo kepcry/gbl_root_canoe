@@ -91,6 +91,29 @@ SfbGfxDrawTextScaled (IN CONST CHAR16 *Text,
                       IN UINT32       Bg);
 
 /*
+ * Width in pixels of Text at 1x with the high-resolution art glyphs (one
+ * 256px cell per character).
+ */
+UINT32
+SfbGfxArtTextWidth (IN CONST CHAR16 *Text);
+
+/*
+ * Draw a string with the 256px art glyphs, scaled by ScaleNum/ScaleDen with
+ * nearest-neighbour sampling: integer upscales stay crisp (no blur), and
+ * fractional downscales keep hard edges.  Characters missing from the art
+ * table are drawn as a hollow placeholder box.  ScaleDen of 1 is an exact
+ * integer scale.
+ */
+VOID
+SfbGfxDrawArtText (IN CONST CHAR16 *Text,
+                   IN UINT32       X,
+                   IN UINT32       Y,
+                   IN UINT32       ScaleNum,
+                   IN UINT32       ScaleDen,
+                   IN UINT32       Fg,
+                   IN UINT32       Bg);
+
+/*
  * Draw a string with the embedded bitmap font blending the glyphs over the
  * existing frame buffer: only the characters are painted, the background is
  * left untouched, and the text therefore takes exactly as much width as the

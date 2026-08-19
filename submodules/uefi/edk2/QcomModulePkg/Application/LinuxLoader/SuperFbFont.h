@@ -45,4 +45,22 @@ SfbFontGetGlyph (IN CHAR16 Ch,
                  OUT UINT8  *Width,
                  OUT UINT8  *Advance);
 
+/*
+ * High-resolution art glyphs (SuperFbFontArtData.c): full 256px-tall cells
+ * for the Pretentious Mode "Character" art, rendered from the same source
+ * font as the UI font so the art matches the UI.  Same packed 4-bit format
+ * as the UI font, just a taller cell.
+ */
+#define SFB_ART_CELL_H  256
+
+extern CONST UINT8          gSfbArtBitmap[];
+extern CONST UINTN          gSfbArtGlyphCount;
+extern CONST SFB_FONT_GLYPH gSfbArtGlyphs[];
+
+BOOLEAN
+SfbArtGetGlyph (IN CHAR16 Ch,
+                OUT UINT32 *Offset,
+                OUT UINT8  *Width,
+                OUT UINT8  *Advance);
+
 #endif /* __SUPER_FB_FONT_H__ */
