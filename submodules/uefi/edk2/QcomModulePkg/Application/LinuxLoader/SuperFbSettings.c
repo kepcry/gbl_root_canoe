@@ -21,6 +21,7 @@ STATIC SFB_SETTINGS  mSfbSettings = {
   L"0000",        /* Pin */
   TRUE,           /* ShowBooting */
   FALSE,          /* BootToMenu: volume key opens the menu, no key boots */
+  3,              /* VolumeKeyTimeoutSec: power-on volume-key scan window */
   FALSE,          /* Pretentious: normal loading screens */
   0,              /* PretentiousArt: 豪情在天 */
   SFB_PRETENTIOUS_LOG_OPTIMIZED
@@ -131,6 +132,16 @@ SfbSettingsLoad (VOID)
     mSfbSettings.BootToMenu = (BOOLEAN)(SfbSettingsParseU32 (Value) != 0);
   }
 
+  if (SfbSettingsFindKey (Record + sizeof (SFB_CFG_TAG) - 1, "vol_key_sec",
+                          Value, sizeof (Value)) != 0) {
+    UINT32  Sec = SfbSettingsParseU32 (Value);
+
+    mSfbSettings.VolumeKeyTimeoutSec =
+      (Sec < SFB_VOL_KEY_MIN_SEC) ? SFB_VOL_KEY_MIN_SEC
+      : (Sec > SFB_VOL_KEY_MAX_SEC) ? SFB_VOL_KEY_MAX_SEC
+                                    : Sec;
+  }
+
   if (SfbSettingsFindKey (Record + sizeof (SFB_CFG_TAG) - 1, "pretentious",
                           Value, sizeof (Value)) != 0) {
     mSfbSettings.Pretentious = (BOOLEAN)(SfbSettingsParseU32 (Value) != 0);
@@ -183,12 +194,13 @@ SfbSettingsSave (IN CONST SFB_SETTINGS *Settings)
   AsciiSPrint (
     Record, sizeof (Record),
     SFB_CFG_TAG
-    "lang=%a;pin_enable=%d;pin=%a;show_booting=%d;boot_to_menu=%d;pretentious=%d;pretentious_mode=%d;pretentious_art=%d",
+    "lang=%a;pin_enable=%d;pin=%a;show_booting=%d;boot_to_menu=%d;vol_key_sec=%d;pretentious=%d;pretentious_mode=%d;pretentious_art=%d",
     (mSfbSettings.Lang == SfbLangEn) ? "en" : "zh",
     mSfbSettings.PinEnabled ? 1 : 0,
     PinA,
     mSfbSettings.ShowBooting ? 1 : 0,
     mSfbSettings.BootToMenu ? 1 : 0,
+    (UINT32)mSfbSettings.VolumeKeyTimeoutSec,
     mSfbSettings.Pretentious ? 1 : 0,
     (UINT32)mSfbSettings.PretentiousMode,
     (UINT32)mSfbSettings.PretentiousArt);

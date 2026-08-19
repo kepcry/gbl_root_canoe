@@ -239,16 +239,28 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
     UINT8         MenuRequested;
     SFB_SETTINGS  Settings;
 
+    /* Load persistent settings from the efisp tail record (best effort)
+     * BEFORE the power-on volume-key scan: the scan window comes from the
+     * "power-on key detect duration" setting. */
+    Status = SfbSettingsLoad ();
+    if (EFI_ERROR (Status)) {
+      DEBUG ((EFI_D_INFO, "SFB: settings unavailable, using defaults: %r\n",
+              Status));
+    }
+    SfbSettingsGet (&Settings);
+
     /*
      * Scan for the volume keys held at power-on FIRST, before any other init
      * disturbs the console input.  WaitForVolumeKey flushes stale input and
-     * then waits for a genuine volume press, skipping every other key (notably
-     * the power key used to switch the device on) rather than being fooled by
-     * it.  Volume Up (the official recovery key slot) or Volume Down (the
-     * documented BDS/fastboot slot) opens the boot menu; no volume press
-     * within the window launches the saved default entry.
+     * then waits for a genuine volume press within the configured window,
+     * skipping every other key (notably the power key used to switch the
+     * device on) rather than being fooled by it.  Volume Up (the official
+     * recovery key slot) or Volume Down (the documented BDS/fastboot slot)
+     * opens the boot menu; no volume press within the window launches the
+     * saved default entry.
      */
-    MenuRequested = WaitForVolumeKey (3000);
+    MenuRequested =
+      WaitForVolumeKey ((UINT32)Settings.VolumeKeyTimeoutSec * 1000);
     DEBUG ((EFI_D_INFO, "SFB: power-on volume key=%u\n", MenuRequested));
 
     /*
@@ -261,18 +273,10 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
       DEBUG ((EFI_D_ERROR, "Unable to start the FAT stack: %r\n", Status));
     }
 
-    /* Load persistent settings from the efisp tail record (best effort). */
-    Status = SfbSettingsLoad ();
-    if (EFI_ERROR (Status)) {
-      DEBUG ((EFI_D_INFO, "SFB: settings unavailable, using defaults: %r\n",
-              Status));
-    }
-
     /* Bring up the graphical UI when the platform offers a GOP; the text
      * console UI is used otherwise. */
     SfbGfxInit ();
 
-    SfbSettingsGet (&Settings);
     if (Settings.BootToMenu) {
       MenuRequested = 1;
     }

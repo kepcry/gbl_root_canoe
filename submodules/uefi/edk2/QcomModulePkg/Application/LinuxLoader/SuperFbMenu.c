@@ -1456,17 +1456,24 @@ SfbRunPinGate (VOID)
         SfbSettingsCheckPin (Pin)) {
       return TRUE;
     }
-    SfbShowBanner (SfbStr (StrWrongPin), SfbStr (StrPressPower));
-    SfbWaitForKey (0);
+    SfbShowBanner (SfbStr (StrWrongPin), SfbStr (StrWrongPinHint));
+    /* Drop any volume-key repeats left over from digit entry, so a key held
+     * while confirming the last digit cannot trigger an action by accident. */
+    gST->ConIn->Reset (gST->ConIn, FALSE);
+    if (SfbWaitForKey (0) == SfbKeyDown) {
+      /* Volume Down on the wrong-PIN prompt: power the device off. */
+      SfbShowActionScreen (SfbStr (StrPoweringOff));
+      ShutdownDevice ();
+    }
   }
 }
 
-#define SFB_SETTINGS_ROW_COUNT  9
+#define SFB_SETTINGS_ROW_COUNT  10
 
 /* TRUE when the settings row may be selected; disabled rows are dimmed and
- * skipped by the cursor.  "Change PIN" needs the PIN on, the Mode row needs
- * Pretentious Mode on, and the Character row additionally needs the mode set
- * to character art. */
+ * skipped by the cursor.  "Change PIN" needs the PIN on, the key-detect
+ * duration needs "Boot to Menu" off, the Mode row needs Pretentious Mode on,
+ * and the Character row additionally needs the mode set to character art. */
 STATIC
 BOOLEAN
 SfbSettingsRowEnabled (IN CONST SFB_SETTINGS *S, IN UINTN Index)
@@ -1474,10 +1481,13 @@ SfbSettingsRowEnabled (IN CONST SFB_SETTINGS *S, IN UINTN Index)
   if (Index == 2) {
     return S->PinEnabled;
   }
-  if (Index == 6) {
-    return S->Pretentious;
+  if (Index == 5) {
+    return !S->BootToMenu;
   }
   if (Index == 7) {
+    return S->Pretentious;
+  }
+  if (Index == 8) {
     return (BOOLEAN)(S->Pretentious &&
                      S->PretentiousMode == SFB_PRETENTIOUS_ART);
   }
@@ -1490,19 +1500,21 @@ SfbRunSettingsMenu (VOID)
   SFB_SETTINGS  S;
   UINTN         Cursor = 0;
   BOOLEAN       Rebuild = TRUE;
+  BOOLEAN       Adjusting = FALSE;
   SFB_KEY       Key;
   EFI_STATUS    SaveStatus = EFI_SUCCESS;
 
   while (TRUE) {
     UINTN   Index;
     CHAR16  RowText[SFB_DESC_CHARS + 8];
+    CHAR16  ValueBuf[16];
 
     if (Rebuild) {
       SfbSettingsGet (&S);
       Rebuild = FALSE;
     }
 
-    /* The settings list is short enough to show in full. */
+    /* The settings list fits one screen in full. */
     SfbBeginScreen (SfbStr (StrSettings), NULL);
 
     for (Index = 0; Index < SFB_SETTINGS_ROW_COUNT; Index++) {
@@ -1531,10 +1543,16 @@ SfbRunSettingsMenu (VOID)
         Value = S.BootToMenu ? SfbStr (StrOn) : SfbStr (StrOff);
         break;
       case 5:
+        Label = SfbStr (StrVolumeKeyTimeout);
+        UnicodeSPrint (ValueBuf, sizeof (ValueBuf), SfbStr (StrSecondsFmt),
+                       (UINT32)S.VolumeKeyTimeoutSec);
+        Value = ValueBuf;
+        break;
+      case 6:
         Label = SfbStr (StrPretentious);
         Value = S.Pretentious ? SfbStr (StrOn) : SfbStr (StrOff);
         break;
-      case 6:
+      case 7:
         Label = SfbStr (StrPretentiousMode);
         Value = (S.PretentiousMode == SFB_PRETENTIOUS_LOG_CLASSIC)
                   ? SfbStr (StrLogClassic)
@@ -1544,14 +1562,14 @@ SfbRunSettingsMenu (VOID)
                           ? SfbStr (StrCustomMode)
                           : SfbStr (StrLogOptimized);
         break;
-      case 7:
+      case 8:
         Label = SfbStr (StrPretentiousArt);
         Value = (S.PretentiousArt == 1) ? SfbStr (StrArtJiaHao)
                : (S.PretentiousArt == 2) ? SfbStr (StrArtJiaXin)
                : (S.PretentiousArt == 3) ? SfbStr (StrArtHao)
                                          : SfbStr (StrArtHaoQing);
         break;
-      case 8:
+      case 9:
       default:
         Label = SfbStr (StrBack);
         break;
@@ -1566,21 +1584,40 @@ SfbRunSettingsMenu (VOID)
         StrnCpyS (RowText, SFB_DESC_CHARS + 8, Label, SFB_DESC_CHARS + 7);
       }
       SfbDrawRow ((BOOLEAN)(Index == Cursor),
-                  SfbSettingsRowEnabled (&S, Index), L" ", RowText);
+                  SfbSettingsRowEnabled (&S, Index),
+                  (Adjusting && Index == Cursor) ? L">" : L" ", RowText);
     }
-    SfbEndScreen (SfbStr (StrKeyNavSelect));
+
+    SfbEndScreen (Adjusting ? SfbStr (StrKeyNavAdjust)
+                            : SfbStr (StrKeyNavSelect));
 
     Key = SfbWaitForKey (0);
     if (Key == SfbKeyUp || Key == SfbKeyDown) {
-      UINTN  Guard;
+      if (Adjusting && Cursor == 5) {
+        if ((Key == SfbKeyUp &&
+             S.VolumeKeyTimeoutSec < SFB_VOL_KEY_MAX_SEC) ||
+            (Key == SfbKeyDown &&
+             S.VolumeKeyTimeoutSec > SFB_VOL_KEY_MIN_SEC)) {
+          S.VolumeKeyTimeoutSec =
+            (Key == SfbKeyUp) ? S.VolumeKeyTimeoutSec + 1
+                              : S.VolumeKeyTimeoutSec - 1;
+          SaveStatus = SfbSettingsSave (&S);
+          Rebuild = TRUE;
+          if (EFI_ERROR (SaveStatus)) {
+            SfbReportStatus (SfbStr (StrConfigFailed), SaveStatus);
+          }
+        }
+      } else {
+        UINTN  Guard;
 
-      SfbMoveCursor (&Cursor, SFB_SETTINGS_ROW_COUNT, Key);
-      /* Skip dimmed, unavailable rows. */
-      for (Guard = 0;
-           Guard < SFB_SETTINGS_ROW_COUNT &&
-           !SfbSettingsRowEnabled (&S, Cursor);
-           Guard++) {
         SfbMoveCursor (&Cursor, SFB_SETTINGS_ROW_COUNT, Key);
+        /* Skip dimmed, unavailable rows. */
+        for (Guard = 0;
+             Guard < SFB_SETTINGS_ROW_COUNT &&
+             !SfbSettingsRowEnabled (&S, Cursor);
+             Guard++) {
+          SfbMoveCursor (&Cursor, SFB_SETTINGS_ROW_COUNT, Key);
+        }
       }
       continue;
     }
@@ -1625,12 +1662,19 @@ SfbRunSettingsMenu (VOID)
       break;
 
     case 5:
+      /* Power on the duration row toggles adjust mode; volume keys then
+       * change the seconds and power confirms. */
+      Adjusting = !Adjusting;
+      Rebuild = TRUE;
+      break;
+
+    case 6:
       S.Pretentious = !S.Pretentious;
       SaveStatus = SfbSettingsSave (&S);
       Rebuild = TRUE;
       break;
 
-    case 6:
+    case 7:
       if (S.Pretentious) {
         S.PretentiousMode = (S.PretentiousMode + 1) % 4;
         SaveStatus = SfbSettingsSave (&S);
@@ -1638,7 +1682,7 @@ SfbRunSettingsMenu (VOID)
       Rebuild = TRUE;
       break;
 
-    case 7:
+    case 8:
       if (S.Pretentious && S.PretentiousMode == SFB_PRETENTIOUS_ART) {
         S.PretentiousArt = (S.PretentiousArt + 1) % 4;
         SaveStatus = SfbSettingsSave (&S);
@@ -1646,7 +1690,7 @@ SfbRunSettingsMenu (VOID)
       Rebuild = TRUE;
       break;
 
-    case 8:
+    case 9:
     default:
       return;
     }

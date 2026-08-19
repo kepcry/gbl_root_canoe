@@ -421,6 +421,11 @@ SfbDrawRow (IN BOOLEAN      Selected,
 VOID
 SfbPanelNote (IN CONST CHAR16 *Text);
 
+/* Announce a power action (Power Off / Restart) and leave the message on
+ * screen while the reset takes effect. */
+VOID
+SfbShowActionScreen (IN CONST CHAR16 *Text);
+
 /*
  * Settings menu: language, PIN lock, "Booting" banner and power-on boot-menu
  * behaviour.  Every change is persisted to the efisp tail settings record.

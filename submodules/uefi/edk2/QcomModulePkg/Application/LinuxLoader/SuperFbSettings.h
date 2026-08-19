@@ -6,7 +6,7 @@
  * entry records.  The record is a single printable-ASCII line of key=value
  * pairs separated by ';', so it stays easy to read and edit on the device:
  *
- *   SFBCFG1;lang=zh;pin_enable=0;pin=0000;show_booting=1;boot_to_menu=1;pretentious=0;pretentious_mode=0;pretentious_art=0
+ *   SFBCFG1;lang=zh;pin_enable=0;pin=0000;show_booting=1;boot_to_menu=1;vol_key_sec=3;pretentious=0;pretentious_mode=0;pretentious_art=0
  *
  * Copyright (c) 2026, contributors to the canoe ABL tree.
  * SPDX-License-Identifier: BSD-3-Clause
@@ -19,6 +19,10 @@
 #include "SuperFbLang.h"
 
 #define SFB_PIN_DIGITS  4
+
+/* Power-on volume-key scan window, in seconds. */
+#define SFB_VOL_KEY_MIN_SEC  1
+#define SFB_VOL_KEY_MAX_SEC  5
 
 /* Pretentious Mode display styles. */
 #define SFB_PRETENTIOUS_LOG_OPTIMIZED  0   /* transparent frame-buffer logs */
@@ -33,6 +37,8 @@ typedef struct {
   CHAR16    Pin[SFB_PIN_DIGITS + 1];
   BOOLEAN   ShowBooting;
   BOOLEAN   BootToMenu;
+  /* Seconds the loader waits for a volume key at power-on: 1..5. */
+  UINTN     VolumeKeyTimeoutSec;
   /* "Pretentious Mode": loading screens dump hundreds of meaningless logs. */
   BOOLEAN   Pretentious;
   /* Character-art text shown on the booting prompt: 0=豪情在天, 1=嘉豪,
