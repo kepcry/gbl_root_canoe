@@ -867,7 +867,36 @@ SfbPretentiousBegin (VOID)
   gSfbPretentiousIndex = 0;
   /* Top margin: keep the first lines clear of the phone's rounded corner. */
   gSfbPretentiousY = 100;
-  gSfbPretentiousMode = S.PretentiousMode;
+gSfbPretentiousMode = S.PretentiousMode;
+}
+
+/*
+ * Fill a black backdrop behind the art, extended 50px above the text so no
+ * leftover content from the previous screen shows through in that band.
+ */
+STATIC
+VOID
+SfbArtBlackBackdrop (IN UINT32 W, IN UINT32 H,
+                     IN UINT32 X, IN UINT32 Y,
+                     IN UINT32 ArtW, IN UINT32 ArtH)
+{
+  UINT32  BgX = (X >= 12) ? X - 12 : 0;
+  UINT32  BgY = (Y >= 50) ? Y - 50 : 0;
+  UINT32  BgW = ArtW + 24;
+  UINT32  BgBottom = Y + ArtH + 12;
+  UINT32  BgH;
+
+  if (BgW > W - BgX) {
+    BgW = W - BgX;
+  }
+  if (BgBottom > H) {
+    BgBottom = H;
+  }
+  if (BgBottom <= BgY) {
+    return;
+  }
+  BgH = BgBottom - BgY;
+  SfbGfxFillRect (BgX, BgY, BgW, BgH, SFB_COLOR_BLACK);
 }
 
 /*
@@ -914,10 +943,7 @@ SfbPretentiousShowArt (IN UINTN Choice)
       X = (W >= ArtW) ? (W - ArtW) / 2 : 0;
       Y = (H >= ArtH) ? (H - ArtH) / 2 : 0;
 
-      if (X >= 12 && Y >= 12) {
-        SfbGfxFillRect (X - 12, Y - 12, ArtW + 24, ArtH + 24,
-                        SFB_COLOR_BLACK);
-      }
+      SfbArtBlackBackdrop (W, H, X, Y, ArtW, ArtH);
       SfbGfxDrawArtText (Art, X, Y, Scale, 1,
                          SFB_COLOR_ACCENT, SFB_COLOR_BLACK);
       return;
@@ -944,10 +970,7 @@ SfbPretentiousShowArt (IN UINTN Choice)
     X = (W >= ArtW) ? (W - ArtW) / 2 : 0;
     Y = (H >= ArtH) ? (H - ArtH) / 2 : 0;
 
-    if (X >= 12 && Y >= 12) {
-      SfbGfxFillRect (X - 12, Y - 12, ArtW + 24, ArtH + 24,
-                      SFB_COLOR_BLACK);
-    }
+    SfbArtBlackBackdrop (W, H, X, Y, ArtW, ArtH);
     SfbGfxDrawArtText (Art, X, Y, 1, Den,
                        SFB_COLOR_ACCENT, SFB_COLOR_BLACK);
   } else {
